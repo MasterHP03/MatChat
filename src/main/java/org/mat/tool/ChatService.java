@@ -5,11 +5,17 @@ import com.google.genai.types.Content;
 import com.google.genai.types.GenerateContentResponse;
 import com.google.genai.types.GenerateContentResponseUsageMetadata;
 import com.google.genai.types.Part;
+import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import org.mat.exception.NoResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,6 +26,7 @@ import java.util.List;
 public class ChatService {
     private final DBManager db;
     private final Logger logger = LoggerFactory.getLogger(ChatService.class);
+    private static final HttpClient httpClient = HttpClient.newHttpClient();
 
     public ChatService(DBManager db) {
         this.db = db;
@@ -31,17 +38,10 @@ public class ChatService {
      * @param message Message sent by user this turn.
      */
     public void processUserMessage(long sessionId, Message message) {
-        // 1. 이번 턴 유저 메시지 객체 생성
-        String userMsg = message.getContentRaw();
-        Content query = Content.builder()
-                .role("user")
-                .parts(Part.fromText(userMsg))
-                .build();
-        // 2. 히스토리 병합 (ImmutableList 예방 Copy)
         List<Content> fullHistory = new ArrayList<>(db.getStructuredHistory(sessionId));
-        fullHistory.add(query);
 
-        generateAndReply(sessionId, fullHistory, message, userMsg);
+        fullHistory = parseImage(message.getJDA(), fullHistory);
+        generateAndReply(sessionId, fullHistory, message);
     }
 
     /**
@@ -73,7 +73,8 @@ public class ChatService {
             return;
         }
 
-        generateAndReply(sessionId, fullHistory, message, null);
+        fullHistory = parseImage(message.getJDA(), fullHistory);
+        generateAndReply(sessionId, fullHistory, message);
     }
 
     /**
@@ -82,9 +83,8 @@ public class ChatService {
      * @param sessionId ID of chat session.
      * @param fullHistory Full context of the session.
      * @param message User's current message (for reply).
-     * @param newUserInput User's new input message. If null (when reroll), the data is not added to DB.
      */
-    public void generateAndReply(long sessionId, List<Content> fullHistory, Message message, String newUserInput) {
+    public void generateAndReply(long sessionId, List<Content> fullHistory, Message message) {
         DBManager.SessionInfo info = db.getSessionInfo(sessionId);
         String systemPrompt = Config.getSystemInstruction(info.persona());
 
@@ -103,16 +103,16 @@ public class ChatService {
             int count = 0;
             final int CHUNK_SIZE = Config.getChunkSize();
             boolean isFirstChunk = true;
+
             while (count < length) {
                 final boolean finalIsFirstChunk = isFirstChunk;
                 String splitText = responseText.substring(count, Math.min(count + CHUNK_SIZE, length));
+
                 message.reply(splitText).queue(botMsg -> {
                     if (finalIsFirstChunk) {
-                        // 메시지 전송 성공 시에만 DB에 현재 턴 모두 저장
+                        // 메시지 전송 성공 시에만 DB에 현재 턴의 모든 내용 저장
+                        // 유저 메시지는 MessageEvent에서 이미 저장함
                         // 청크 나눠보낼 때, 첫 청크를 보낼 때만 저장되도록
-                        if (newUserInput != null) {
-                            db.addMessage(sessionId,message.getIdLong(), "user", newUserInput);
-                        }
                         db.addMessage(sessionId, botMsg.getIdLong(), "model", responseText,
                                 info.model(),
                                 tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5]
@@ -142,6 +142,87 @@ public class ChatService {
         } else {
             logger.error("응답 중 알 수 없는 오류: ", e);
             message.reply("알 수 없는 오류: " + e.getMessage()).queue();
+        }
+    }
+
+    private List<Content> parseImage(JDA jda, List<Content> toParse) {
+        List<Content> readyHistory = new ArrayList<>();
+
+        for (Content c : toParse) {
+            List<Part> readyParts = new ArrayList<>();
+
+            for (Part p : c.parts().orElse(new ArrayList<>())) {
+                String text = p.text().orElse(null);
+
+                if (text != null && text.startsWith("[IMG:")) {
+                    try {
+                        // Getting rid of "[IMG:", "]", leaving "URL:ID"
+                        String inner = text.substring(5, text.length() - 1);
+
+                        int firstColon = inner.indexOf(":");
+                        long archiveId = Long.parseLong(inner.substring(0, firstColon));
+                        String url = inner.substring(firstColon + 1);
+
+                        readyParts.add(toImagePart(jda, url, archiveId));
+                    } catch (Exception e) {
+                        logger.error("이미지 태그 파싱 중 에러 발생: {}", text, e);
+                        readyParts.add(Part.fromText("[이미지 파싱 실패]"));
+                    }
+                } else {
+                    // 일반 텍스트
+                    readyParts.add(p);
+                }
+            }
+
+            readyHistory.add(Content.builder()
+                    .role(c.role().orElse(""))
+                    .parts(readyParts)
+                    .build());
+        }
+
+        return readyHistory;
+    }
+
+    private Part toImagePart(JDA jda, String oldUrl, long archiveMsgId) {
+        HttpResponse<byte[]> response = download(oldUrl);
+        String finalUrl = oldUrl;
+
+        try {
+            if (response == null || response.statusCode() == 403 || response.statusCode() == 404) {
+                logger.warn("HTTP 링크 만료, 디스코드 접근 시도");
+
+                TextChannel archive = jda.getTextChannelById(Config.getArchive());
+                if (archive == null) {
+                    throw new RuntimeException("유효한 채널이 아님 (ID 실수?)");
+                }
+                Message msg = archive.retrieveMessageById(archiveMsgId).complete();
+
+                String freshUrl = msg.getAttachments().getFirst().getUrl();
+                finalUrl = freshUrl;
+                db.updateImageUrl(archiveMsgId, freshUrl);
+
+                response = download(freshUrl);
+                if (response == null || response.statusCode() != 200) {
+                    throw new RuntimeException("새로 불러온 링크로도 다운로드 실패");
+                }
+            }
+            byte[] imageBytes = response.body();
+            String mimeType = finalUrl.contains(".png") ? "image/png" : "image/jpeg";
+            return Part.fromBytes(imageBytes, mimeType);
+        } catch (Exception e) {
+            logger.error("디스코드 이미지 다운로드 실패", e);
+            return Part.fromText("[이미지 로드 실패]");
+        }
+    }
+
+    private HttpResponse<byte[]> download(String imageUrl) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(imageUrl)).build();
+
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        } catch (Exception e) {
+            logger.error("HTTP 이미지 다운로드 실패 ({})", imageUrl, e);
+            return null;
         }
     }
 

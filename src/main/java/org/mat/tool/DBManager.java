@@ -3,6 +3,7 @@ package org.mat.tool;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import org.mat.def.SessionSetting;
+import org.mat.util.FileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,7 +20,7 @@ public class DBManager {
 
     public void init() {
         // 연결 시도
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
             logger.info("DB 연결 완료");
 
@@ -32,6 +33,7 @@ public class DBManager {
                         persona TEXT,
                         model TEXT,
                         user_note TEXT DEFAULT '',
+                        use_tool_image INTEGER DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     );
                     """);
@@ -53,6 +55,18 @@ public class DBManager {
                         FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                     );
                     """);
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS attachments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id INTEGER NOT NULL,
+                        msg_id INTEGER NOT NULL,
+                        type TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        archive_msg_id INTEGER NOT NULL,
+                        created at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (msg_id) REFERENCES messages(msg_id) ON DELETE CASCADE
+                    );
+                    """);
 
             logger.info("DB 생성됨");
         } catch (SQLException e) {
@@ -69,7 +83,7 @@ public class DBManager {
                 ORDER BY internal_id ASC
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             ResultSet rs = pstmt.executeQuery();
@@ -99,24 +113,38 @@ public class DBManager {
     public List<Content> getStructuredHistory(long sessionId) {
         List<Content> history = new ArrayList<>();
         String sql = """
-                SELECT role, content
+                SELECT msg_id, role, content
                 FROM messages
                 WHERE session_id = ?
                 ORDER BY internal_id ASC
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             ResultSet rs = pstmt.executeQuery();
 
             while (rs.next()) {
+                long msgId = rs.getLong("msg_id");
                 String role = rs.getString("role");
                 String msg = rs.getString("content");
 
+                List<Part> parts = new ArrayList<>();
+
+                // 메시지가 존재할 경우 (메시지는 없고 이미지만 있을 수도 있음)
+                if (msg != null && !msg.isBlank()) {
+                    parts.add(Part.fromText(msg));
+                }
+
+                // 이미지 추가
+                List<FileUtil.AttachmentInfo> attachments = getAttachments(sessionId, msgId);
+                for (FileUtil.AttachmentInfo att : attachments) {
+                    parts.add(Part.fromText("[IMG:" + att.url() + ":" + att.url() + "]"));
+                }
+
                 Content content = Content.builder()
                         .role(role)
-                        .parts(Part.fromText(msg))
+                        .parts(parts)
                         .build();
                 history.add(content);
             }
@@ -138,7 +166,7 @@ public class DBManager {
                 VALUES (?, ?, ?, ?, ?)
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             pstmt.setString(2, userId);
@@ -168,7 +196,7 @@ public class DBManager {
                 ?, ?, ?, ?, ?, ?)
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             pstmt.setLong(2, msgId);
@@ -197,7 +225,7 @@ public class DBManager {
                 WHERE session_id = ? AND msg_id = ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, newContent);
             pstmt.setLong(2, sessionId);
@@ -218,7 +246,7 @@ public class DBManager {
                 WHERE session_id = ? AND msg_id = ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             pstmt.setLong(2, msgId);
@@ -238,7 +266,7 @@ public class DBManager {
                 WHERE session_id = ? AND msg_id > ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             pstmt.setLong(2, targetMsgId);
@@ -263,7 +291,7 @@ public class DBManager {
                 WHERE session_id = ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, newSessionId);
             pstmt.setLong(2, oldSessionId);
@@ -284,7 +312,7 @@ public class DBManager {
                 WHERE session_id = ? AND msg_id = ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             pstmt.setLong(2, msgId);
@@ -302,7 +330,7 @@ public class DBManager {
                 WHERE session_id = ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             return pstmt.executeQuery().next();
@@ -319,7 +347,7 @@ public class DBManager {
                 WHERE session_id = ? AND msg_id = ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             pstmt.setLong(2, msgId);
@@ -338,7 +366,7 @@ public class DBManager {
                 WHERE session_id = ?
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             ResultSet rs = pstmt.executeQuery();
@@ -364,7 +392,7 @@ public class DBManager {
                 WHERE session_id = ?
                 """.formatted(setting.getColumnName());
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, value);
             pstmt.setLong(2, sessionId);
@@ -384,7 +412,7 @@ public class DBManager {
                 ORDER BY internal_id DESC LIMIT 1
                 """;
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setLong(1, sessionId);
             ResultSet rs = pstmt.executeQuery();
@@ -400,8 +428,88 @@ public class DBManager {
         return null; // 메시지 없음
     }
 
-    public void printStackTrace(SQLException e) {
+    public boolean addAttachment(long sessionId, long msgId, String type, String url, long archiveMsgId) {
+        String sql = """
+                INSERT INTO attachments
+                (session_id, msg_id, type, url, archive_msg_id)
+                VALUES (?, ?, ?, ?, ?)
+                """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, msgId);
+            pstmt.setString(3, type);
+            pstmt.setString(4, url);
+            pstmt.setLong(5, archiveMsgId);
+            pstmt.executeUpdate();
+
+            logger.info("첨부파일 링크 저장 완료 ({})", url);
+            return true;
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return false;
+    }
+
+    public List<FileUtil.AttachmentInfo> getAttachments(long sessionId, long msgId) {
+        List<FileUtil.AttachmentInfo> atts = new ArrayList<>();
+        String sql = """
+                SELECT url, archive_msg_id
+                FROM attachments
+                WHERE session_id = ? AND msg_id = ?
+                """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, sessionId);
+            pstmt.setLong(2, msgId);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                atts.add(new FileUtil.AttachmentInfo(
+                        rs.getString("url"),
+                        rs.getLong("archive_msg_id")));
+            }
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return atts;
+    }
+
+    public boolean updateImageUrl(long archiveMsgId, String url) {
+        String sql = """
+                UPDATE attachments
+                SET url = ?
+                WHERE archive_msg_id = ?
+                """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, url);
+            pstmt.setLong(2, archiveMsgId);
+            pstmt.executeUpdate();
+
+            logger.info("첨부파일 링크 업데이트됨 ({})", url);
+            return true;
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return false;
+    }
+
+    private void printStackTrace(SQLException e) {
         logger.error("DB 처리 중 오류 발생: ", e);
+    }
+
+    private Connection getConnection() throws SQLException {
+        Connection conn = DriverManager.getConnection(DB_URL);
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA foreign_keys = ON;");
+        }
+
+        return conn;
     }
 
     public record SessionInfo(String persona, String model, String userNote) {
