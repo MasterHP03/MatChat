@@ -19,7 +19,7 @@ public class GeminiManager {
      * @param userNote User-defined instruction.
      * @return Response from Gemini.
      * @throws RuntimeException If Gemini fails to generate a content
-     * due to reasons like API error, quota exceeded, safety filter.
+     * due to reasons like API error, quota exceeded or safety filter.
      */
     public static GenerateContentResponse generate(String systemPrompt, List<Content> history, String model, String userNote) throws RuntimeException {
         try (Client client = Client.builder()
