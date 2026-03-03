@@ -156,7 +156,7 @@ public class ChatService {
 
                 if (text != null && text.startsWith("[IMG:")) {
                     try {
-                        // Getting rid of "[IMG:", "]", leaving "URL:ID"
+                        // Getting rid of "[IMG:", "]", leaving "ID:URL" (https has colon, so proper is ID being front
                         String inner = text.substring(5, text.length() - 1);
 
                         int firstColon = inner.indexOf(":");
