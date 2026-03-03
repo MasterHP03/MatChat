@@ -52,7 +52,9 @@ public class DBManager {
                         token_output INTEGER DEFAULT 0,
                         token_total INTEGER DEFAULT 0,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+                        FOREIGN KEY (session_id)
+                        REFERENCES sessions(session_id),
+                        UNIQUE(session_id, msg_id)
                     );
                     """);
             stmt.execute("""
@@ -64,7 +66,8 @@ public class DBManager {
                         url TEXT NOT NULL,
                         archive_msg_id INTEGER NOT NULL,
                         created at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (msg_id) REFERENCES messages(msg_id) ON DELETE CASCADE
+                        FOREIGN KEY (session_id, msg_id)
+                        REFERENCES messages(session_id, msg_id) ON DELETE CASCADE
                     );
                     """);
 
@@ -139,7 +142,7 @@ public class DBManager {
                 // 이미지 추가
                 List<FileUtil.AttachmentInfo> attachments = getAttachments(sessionId, msgId);
                 for (FileUtil.AttachmentInfo att : attachments) {
-                    parts.add(Part.fromText("[IMG:" + att.url() + ":" + att.url() + "]"));
+                    parts.add(Part.fromText("[IMG:" + att.archiveMsgId() + ":" + att.url() + "]"));
                 }
 
                 Content content = Content.builder()
