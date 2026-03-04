@@ -3,6 +3,7 @@ package org.mat.tool;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import org.mat.def.SessionSetting;
+import org.mat.def.Tools;
 import org.mat.util.FileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +34,7 @@ public class DBManager {
                         persona TEXT,
                         model TEXT,
                         user_note TEXT DEFAULT '',
-                        use_tool_image INTEGER DEFAULT 0,
+                        use_generate_image INTEGER DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     );
                     """);
@@ -494,6 +495,44 @@ public class DBManager {
             pstmt.executeUpdate();
 
             logger.info("첨부파일 링크 업데이트됨 ({})", url);
+            return true;
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return false;
+    }
+
+    public boolean isToolEnabled(long sessionId, Tools tool) {
+        String columnName = "use_" + tool.getToolName();
+        String sql = """
+                SELECT %s
+                FROM sessions
+                WHERE session_id = ?
+                """.formatted(columnName);
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, sessionId);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) return rs.getInt(columnName) == 1;
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return false;
+    }
+
+    public boolean updateToolEnabled(long sessionId, Tools tool, boolean value) {
+        String sql = """
+                UPDATE sessions
+                SET %s = ?
+                WHERE session_id = ?
+                """.formatted("use_" + tool.getToolName());
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, value ? 1 : 0);
+            pstmt.setLong(2, sessionId);
+            pstmt.executeUpdate();
             return true;
         } catch (SQLException e) {
             printStackTrace(e);

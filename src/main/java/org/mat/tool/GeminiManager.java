@@ -2,14 +2,18 @@ package org.mat.tool;
 
 import com.google.genai.Client;
 import com.google.genai.types.*;
+import org.mat.def.Tools;
 import org.mat.exception.NoResponseException;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Direct messenger that communicates with Gemini API.
  */
 public class GeminiManager {
+
+    private static final Tool imageTool = getTool(Tools.IMAGE);
 
     /**
      * Sends a requests to Gemini API and gets a response.
@@ -21,7 +25,9 @@ public class GeminiManager {
      * @throws RuntimeException If Gemini fails to generate a content
      * due to reasons like API error, quota exceeded or safety filter.
      */
-    public static GenerateContentResponse generate(String systemPrompt, List<Content> history, String model, String userNote) throws RuntimeException {
+    public static GenerateContentResponse generate(String systemPrompt, List<Content> history,
+                                                   String model, String userNote,
+                                                   boolean enableImageTool) throws RuntimeException {
         try (Client client = Client.builder()
                 .apiKey(Config.getGeminiKey())
                 .httpOptions(HttpOptions.builder()
@@ -33,10 +39,17 @@ public class GeminiManager {
             // 시스템 프롬프트와 유저 노트 병합
             String finalPrompt = systemPrompt;
             if (!userNote.isBlank()) finalPrompt += "\n\n[User-defined Instruction]\n" + userNote;
-            GenerateContentConfig config = GenerateContentConfig.builder()
+
+            GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
                     .systemInstruction(Content.fromParts(
-                            Part.fromText(finalPrompt)))
-                    .build();
+                            Part.fromText(finalPrompt)));
+            List<Tool> tools = new ArrayList<>();
+            if (enableImageTool) {
+                tools.add(imageTool);
+            }
+            if (!tools.isEmpty()) configBuilder.tools(tools);
+
+            GenerateContentConfig config = configBuilder.build();
 
             // Gemini 호출
             GenerateContentResponse response = client.models.generateContent(
@@ -58,6 +71,38 @@ public class GeminiManager {
 
             return response;
         }
+    }
+
+    public static GenerateContentResponse generateImage(String prompt) {
+        try (Client client = Client.builder()
+                .apiKey(Config.getGeminiKey())
+                .httpOptions(HttpOptions.builder()
+                        .retryOptions(HttpRetryOptions.builder()
+                                .attempts(Config.getMaxRetry())
+                                .build())
+                        .build())
+                .build()) {
+            GenerateContentResponse response = client.models.generateContent(
+                    "gemini-3.1-flash-image-preview",
+                    prompt,
+                    GenerateContentConfig.builder()
+                            .responseModalities("TEXT", "IMAGE")
+                            .build()
+            );
+
+            return response;
+        } catch (Exception e) {
+            throw new RuntimeException("이미지 생성 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private static Tool getTool(Tools tool) {
+        return Tool.builder()
+                .functionDeclarations(FunctionDeclaration.builder()
+                        .name(tool.getToolName())
+                        .description(tool.getDescription())
+                        .parameters(tool.getParameters())
+                ).build();
     }
 
 }

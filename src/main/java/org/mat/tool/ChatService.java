@@ -1,14 +1,16 @@
 package org.mat.tool;
 
+import com.google.genai.Client;
 import com.google.genai.errors.ApiException;
-import com.google.genai.types.Content;
-import com.google.genai.types.GenerateContentResponse;
-import com.google.genai.types.GenerateContentResponseUsageMetadata;
-import com.google.genai.types.Part;
+import com.google.genai.types.*;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.utils.FileUpload;
+import org.mat.def.ImageType;
+import org.mat.def.Tools;
 import org.mat.exception.NoResponseException;
+import org.mat.util.FileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,8 +18,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Interface between Discord and Gemini.
@@ -92,11 +100,88 @@ public class ChatService {
             message.getChannel().sendTyping().queue();
 
             // Gemini 호출
-            GenerateContentResponse response = GeminiManager.generate(systemPrompt, fullHistory, info.model(), info.userNote());
-            String responseText = response.text() == null ? "응답 없음" : response.text();
+            GenerateContentResponse response = GeminiManager.generate(systemPrompt, fullHistory,
+                    info.model(), info.userNote(), db.isToolEnabled(sessionId, Tools.IMAGE));
+
+            Content responseContent = response.candidates().orElseThrow().getFirst().content().orElse(null);
+            if (responseContent == null) throw new Exception("응답으로 반환된 Content가 null입니다.");
+            List<Part> responseParts = responseContent.parts().orElse(new ArrayList<>());
+            boolean isFunctionCall = false;
+            FunctionCall funcCall = null;
 
             // 토큰 사용량 계산
             int[] tokens = getTokenCount(response);
+
+            for (Part part : responseParts) {
+                if (part.functionCall().isPresent()) {
+                    isFunctionCall = true;
+                    funcCall = part.functionCall().get();
+                    break;
+                }
+            }
+
+            if (isFunctionCall) {
+                String funcName = funcCall.name().orElse("");
+
+                if (Tools.IMAGE.getToolName().equals(funcName)) {
+                    Map<String, Object> args = funcCall.args().orElse(new HashMap<>());
+                    String imagePrompt = (String) args.get("prompt");
+                    String spokenMessage = (String) args.get("message");
+
+                    String preText = spokenMessage != null ? spokenMessage : "";
+
+                    logger.info("이미지 생성 요청 감지. 프롬프트: {}", imagePrompt);
+                    logger.info("봇의 메시지: {}", preText);
+
+                    GenerateContentResponse funcResponse = GeminiManager.generateImage(imagePrompt);
+                    List<Part> funcParts = funcResponse.candidates().orElseThrow()
+                            .getFirst().content().orElseThrow().parts().orElseThrow();
+                    StringBuilder postText = new StringBuilder();
+                    byte[] bytes = null;
+                    for (Part part : funcParts) {
+                        if (part.text().isPresent()) {
+                            postText.append("\n").append(part.text()).append("\n");
+                        } else if (part.inlineData().isPresent()) {
+                            bytes = part.inlineData().get().data().orElseThrow();
+                        }
+                    }
+                    if (bytes == null) throw new RuntimeException("이미지 생성 결과가 null입니다.");
+                    byte[] imageBytes = bytes;
+
+                    int[] imageTokens = getTokenCount(funcResponse);
+                    for (int i = 0; i < tokens.length; i++) {
+                        tokens[i] += imageTokens[i];
+                    }
+
+                    DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss");
+                    String fileName = LocalDateTime.now().format(dtf) + ".png";
+
+                    message.replyFiles(FileUpload.fromData(imageBytes, fileName))
+                            .setContent(preText + postText)
+                            .queue(botMsg -> {
+                                db.addMessage(sessionId, botMsg.getIdLong(), "model",
+                                        preText + postText, info.model(),
+                                        tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5]);
+
+                                FileUtil.upload(message.getJDA(), imageBytes, fileName, sessionId)
+                                        .thenAccept(result -> {
+                                            if (result != null) {
+                                                db.addAttachment(sessionId,
+                                                        botMsg.getIdLong(),
+                                                        ImageType.GENERATED.name(),
+                                                        result.url(),
+                                                        result.archiveMsgId());
+                                            }
+                                        });
+                                }, e -> {
+                                logger.error("이미지 전송 실패!");
+                                throw new RuntimeException("이미지 전송 실패 ", e);
+                            });
+                }
+                return;
+            }
+
+            String responseText = response.text() == null ? "응답 없음" : response.text();
 
             // 메시지 분할 전송
             int length = responseText.length();
