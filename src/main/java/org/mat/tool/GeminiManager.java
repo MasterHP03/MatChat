@@ -90,6 +90,19 @@ public class GeminiManager {
                             .build()
             );
 
+            // 응답이 없을 경우, 필터 때문인지 검사
+            if (response.candidates().isEmpty()) {
+                String reason = "응답 없음";
+                if (response.promptFeedback().isPresent()) {
+                    GenerateContentResponsePromptFeedback feedback = response.promptFeedback().get();
+                    reason = String.join(" | ",
+                            feedback.blockReason().toString(),
+                            feedback.blockReasonMessage().toString(),
+                            feedback.safetyRatings().toString());
+                }
+                throw new NoResponseException(reason);
+            }
+
             return response;
         } catch (Exception e) {
             throw new RuntimeException("이미지 생성 실패: " + e.getMessage(), e);
