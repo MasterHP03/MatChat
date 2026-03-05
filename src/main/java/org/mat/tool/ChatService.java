@@ -149,9 +149,6 @@ public class ChatService {
                     byte[] imageBytes = bytes;
 
                     int[] imageTokens = getTokenCount(funcResponse);
-                    for (int i = 0; i < tokens.length; i++) {
-                        tokens[i] += imageTokens[i];
-                    }
 
                     DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss");
                     String fileName = LocalDateTime.now().format(dtf) + ".png";
@@ -161,7 +158,9 @@ public class ChatService {
                             .queue(botMsg -> {
                                 db.addMessage(sessionId, botMsg.getIdLong(), "model",
                                         preText + postText, info.model(),
-                                        tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5]);
+                                        tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5],
+                                        imagePrompt, imageTokens[0], imageTokens[1], imageTokens[2],
+                                        imageTokens[3], imageTokens[4], imageTokens[5]);
 
                                 FileUtil.upload(message.getJDA(), imageBytes, fileName, sessionId)
                                         .thenAccept(result -> {

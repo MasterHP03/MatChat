@@ -42,7 +42,8 @@ public class GeminiManager {
 
             GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
                     .systemInstruction(Content.fromParts(
-                            Part.fromText(finalPrompt)));
+                            Part.fromText(finalPrompt)))
+                    .maxOutputTokens(Config.getMaxOutputToken());
             List<Tool> tools = new ArrayList<>();
             if (enableImageTool) {
                 tools.add(imageTool);

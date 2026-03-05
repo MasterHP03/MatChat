@@ -90,6 +90,15 @@ public class Config {
         }
     }
 
+    public static int getMaxOutputToken() {
+        try {
+            String toParse = dotenv.get("MAX_OUTPUT_TOKEN", "4096");
+            return Integer.parseInt(toParse);
+        } catch (Exception e) {
+            return 4096;
+        }
+    }
+
     public static String getSystemInstruction(String name) {
         try {
             Path path = getPathByName(name);
