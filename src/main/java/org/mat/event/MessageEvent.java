@@ -15,7 +15,6 @@ import org.mat.util.FileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +51,9 @@ public class MessageEvent extends ListenerAdapter {
 
         Message message = event.getMessage();
         String msg = message.getContentRaw();
-        if (msg.isBlank()) return;
+
+        boolean hasValidAtt = message.getAttachments().stream().anyMatch(Message.Attachment::isImage);
+        if (msg.isBlank() && !hasValidAtt) return;
 
         long userId = user.getIdLong();
         long now = System.currentTimeMillis();
