@@ -96,6 +96,24 @@ public class ChatService {
         DBManager.SessionInfo info = db.getSessionInfo(sessionId);
         String systemPrompt = Config.getSystemInstruction(info.persona());
 
+        String currentTime = LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        String timeContext = """
+                \n
+                [System Note (Do not consider this as user input)]
+                현재 시스템 시각은 %s입니다.
+                """.formatted(currentTime);
+
+        Content lastContent = fullHistory.getLast();
+        List<Part> updatedParts = new ArrayList<>(lastContent.parts().orElse(new ArrayList<>()));
+        updatedParts.add(Part.fromText(timeContext));
+        Content updatedContent = Content.builder()
+                .role(lastContent.role().orElse("user"))
+                .parts(updatedParts)
+                .build();
+
+        fullHistory.set(fullHistory.size() - 1, updatedContent);
+
         try {
             message.getChannel().sendTyping().queue();
 
