@@ -168,14 +168,17 @@ public class DBManager {
     }
 
     public long createSession(long sessionId, String userId, String title) {
-        // TODO 유저별 관리 메소드 만들면 바꾸기
         String currentPersona = Config.getDefaultPersona();
         String currentModel = Config.getDefaultModel().getId();
 
+        return createSession(sessionId, userId, title, currentPersona, currentModel, "");
+    }
+
+    public long createSession(long sessionId, String userId, String title, String persona, String model, String userNote) {
         String sql = """
                 INSERT INTO sessions
-                (session_id, user_id, title, persona, model)
-                VALUES (?, ?, ?, ?, ?)
+                (session_id, user_id, title, persona, model, user_note)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = getConnection();
@@ -183,8 +186,9 @@ public class DBManager {
             pstmt.setLong(1, sessionId);
             pstmt.setString(2, userId);
             pstmt.setString(3, title);
-            pstmt.setString(4, currentPersona);
-            pstmt.setString(5, currentModel);
+            pstmt.setString(4, persona);
+            pstmt.setString(5, model);
+            pstmt.setString(6, userNote);
             pstmt.executeUpdate();
 
             logger.info("세션 생성 완료: {}", sessionId);
@@ -313,7 +317,15 @@ public class DBManager {
     }
 
     public boolean forkSession(long oldSessionId, long newSessionId, String userId, String newTitle) {
-        createSession(newSessionId, userId, newTitle);
+        SessionInfo info = getSessionInfo(oldSessionId);
+
+        createSession(newSessionId, userId, newTitle, info.persona(), info.model(), info.userNote());
+
+        for (Tools tool : Tools.values()) {
+            if (isToolEnabled(oldSessionId, tool)) {
+                updateToolEnabled(newSessionId, tool, true);
+            }
+        }
 
         String sql = """
                 INSERT INTO messages
