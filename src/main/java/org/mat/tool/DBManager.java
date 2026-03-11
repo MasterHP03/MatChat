@@ -73,6 +73,7 @@ public class DBManager {
                         type TEXT NOT NULL,
                         url TEXT NOT NULL,
                         archive_msg_id INTEGER NOT NULL,
+                        user_order INTEGER DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (session_id, msg_id)
                         REFERENCES messages(session_id, msg_id) ON DELETE CASCADE
@@ -459,11 +460,11 @@ public class DBManager {
         return null; // 메시지 없음
     }
 
-    public boolean addAttachment(long sessionId, long msgId, String type, String url, long archiveMsgId) {
+    public boolean addAttachment(long sessionId, long msgId, String type, String url, long archiveMsgId, int userOrder) {
         String sql = """
                 INSERT INTO attachments
-                (session_id, msg_id, type, url, archive_msg_id)
-                VALUES (?, ?, ?, ?, ?)
+                (session_id, msg_id, type, url, archive_msg_id, user_order)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = getConnection();
@@ -473,6 +474,7 @@ public class DBManager {
             pstmt.setString(3, type);
             pstmt.setString(4, url);
             pstmt.setLong(5, archiveMsgId);
+            pstmt.setInt(6, userOrder);
             pstmt.executeUpdate();
 
             logger.info("첨부파일 링크 저장 완료 ({})", url);
@@ -489,6 +491,7 @@ public class DBManager {
                 SELECT url, archive_msg_id
                 FROM attachments
                 WHERE session_id = ? AND msg_id = ?
+                ORDER BY user_order ASC, id ASC
                 """;
 
         try (Connection conn = getConnection();

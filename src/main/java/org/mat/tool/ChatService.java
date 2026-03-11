@@ -169,7 +169,8 @@ public class ChatService {
                                                         botMsg.getIdLong(),
                                                         ImageType.GENERATED.name(),
                                                         result.url(),
-                                                        result.archiveMsgId());
+                                                        result.archiveMsgId(),
+                                                        0);
                                             }
                                         });
                                 }, e -> {

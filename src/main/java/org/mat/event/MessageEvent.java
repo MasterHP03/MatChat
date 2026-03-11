@@ -84,8 +84,10 @@ public class MessageEvent extends ListenerAdapter {
 
             List<Message.Attachment> attachments = message.getAttachments();
             List<CompletableFuture<Void>> imageFutures = new ArrayList<>();
-            for (Message.Attachment img : attachments) {
+            for (int i = 0; i < attachments.size(); i++) {
+                Message.Attachment img = attachments.get(i);
                 if (img.isImage()) {
+                    final int userOrder = i;
                     // 다운로드 -> 업로드 -> DB 저장
                     CompletableFuture<Void> future = img.getProxy().download().thenCompose(inputStream -> {
                         try (var is = inputStream) {
@@ -100,7 +102,8 @@ public class MessageEvent extends ListenerAdapter {
                                     message.getIdLong(),
                                     ImageType.INPUT.name(),
                                     result.url(),
-                                    result.archiveMsgId());
+                                    result.archiveMsgId(),
+                                    userOrder);
                         }
                     });
                     imageFutures.add(future);
