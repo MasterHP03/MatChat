@@ -101,7 +101,7 @@ public class ChatService {
         String timeContext = """
                 \n
                 [System Note (Do not consider this as user input)]
-                현재 시스템 시각은 %s입니다.
+                Current Time (GMT): %s
                 """.formatted(currentTime);
 
         Content lastContent = fullHistory.getLast();
