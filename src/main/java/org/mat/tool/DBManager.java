@@ -73,7 +73,7 @@ public class DBManager {
                         type TEXT NOT NULL,
                         url TEXT NOT NULL,
                         archive_msg_id INTEGER NOT NULL,
-                        created at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (session_id, msg_id)
                         REFERENCES messages(session_id, msg_id) ON DELETE CASCADE
                     );
