@@ -74,7 +74,7 @@ public class GeminiManager {
         }
     }
 
-    public static GenerateContentResponse generateImage(String prompt) {
+    public static GenerateContentResponse generateImage(String prompt, List<Part> referenceImages) {
         try (Client client = Client.builder()
                 .apiKey(Config.getGeminiKey())
                 .httpOptions(HttpOptions.builder()
@@ -83,9 +83,17 @@ public class GeminiManager {
                                 .build())
                         .build())
                 .build()) {
+            List<Part> inputParts = new ArrayList<>();
+            if (referenceImages != null && !referenceImages.isEmpty()) {
+                inputParts.addAll(referenceImages);
+            }
+            inputParts.add(Part.fromText(prompt));
+
+            Content inputContent = Content.builder().parts(inputParts).build();
+
             GenerateContentResponse response = client.models.generateContent(
                     "gemini-3.1-flash-image-preview",
-                    prompt,
+                    inputContent,
                     GenerateContentConfig.builder()
                             .responseModalities("TEXT", "IMAGE")
                             .build()

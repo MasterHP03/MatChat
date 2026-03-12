@@ -36,6 +36,8 @@ public class ChatService {
     private final Logger logger = LoggerFactory.getLogger(ChatService.class);
     private static final HttpClient httpClient = HttpClient.newHttpClient();
 
+    private static final String imageFormat = "[Reference Id: %s]";
+
     public ChatService(DBManager db) {
         this.db = db;
     }
@@ -151,7 +153,39 @@ public class ChatService {
                     logger.info("이미지 생성 요청 감지. 프롬프트: {}", imagePrompt);
                     logger.info("봇의 메시지: {}", preText);
 
-                    GenerateContentResponse funcResponse = GeminiManager.generateImage(imagePrompt);
+                    @SuppressWarnings("unchecked")
+                    List<String> refIds = (List<String>) args.get("reference_ids");
+                    List<Part> referenceParts = new ArrayList<>();
+
+                    if (refIds != null && !refIds.isEmpty()) {
+                        for (String idStr : refIds) {
+                            boolean found = false;
+
+                            for (Content content : fullHistory) {
+                                List<Part> parts = content.parts().orElse(new ArrayList<>());
+
+                                for (int i = 0; i < parts.size(); i++) {
+                                    String text = parts.get(i).text().orElse("");
+
+                                    if (text.contains(imageFormat.formatted(idStr))) {
+                                        if (i + 1 < parts.size()) {
+                                            referenceParts.add(parts.get(i + 1));
+                                            logger.info("이미지 ID: {} 참조", idStr);
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (found) break;
+                            }
+
+                            if (!found) {
+                                logger.warn("대화 내역에서 레퍼런스 이미지를 찾을 수 없음 (ID: {})", idStr);
+                            }
+                        }
+                    }
+
+                    GenerateContentResponse funcResponse = GeminiManager.generateImage(imagePrompt, referenceParts);
                     List<Part> funcParts = funcResponse.candidates().orElseThrow()
                             .getFirst().content().orElseThrow().parts().orElseThrow();
                     StringBuilder postText = new StringBuilder();
@@ -265,6 +299,9 @@ public class ChatService {
                         int firstColon = inner.indexOf(":");
                         long archiveId = Long.parseLong(inner.substring(0, firstColon));
                         String url = inner.substring(firstColon + 1);
+
+                        // ID Tag for Reference Image Call
+                        readyParts.add(Part.fromText(imageFormat.formatted(archiveId)));
 
                         readyParts.add(toImagePart(jda, url, archiveId));
                     } catch (Exception e) {

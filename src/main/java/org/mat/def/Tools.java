@@ -27,8 +27,19 @@ public enum Tools {
                                             Text that contains AI's reaction to User's request.
                                             When you decided to use this tool,
                                             AND if you need to react to user or User wants you to react,
-                                            you MUST write on this field, NOT generating a regular text response.
+                                            you MUST write any comment or reaction on this field, NOT generating a regular text response.
                                             """)
+                                    .build(),
+                            "reference_ids", Schema.builder()
+                                    .type("ARRAY")
+                                    .description("""
+                                            List of reference image IDs if the User wants to composite, edit, or refer to specific previous images in the chat.
+                                            Extract the exact IDs from the '[Reference Id: {ID}] tags in the conversation history,
+                                            Leave this array empty if no reference images are requested or needed.
+                                            """)
+                                    .items(Schema.builder()
+                                            .type("STRING")
+                                            .build())
                                     .build()
                             ))
                     .required("prompt")
