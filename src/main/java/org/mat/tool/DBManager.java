@@ -222,7 +222,7 @@ public class DBManager {
                 image_token_thought, image_token_output, image_token_total)
                 VALUES (?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
                 ?, ?, ?)
                 """;
 
