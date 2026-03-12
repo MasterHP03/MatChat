@@ -53,6 +53,7 @@ public class DBManager {
                         token_output INTEGER DEFAULT 0,
                         token_total INTEGER DEFAULT 0,
                         image_content TEXT,
+                        reference_image_ids TEXT,
                         image_token_input INTEGER DEFAULT 0,
                         image_token_cache INTEGER DEFAULT 0,
                         image_token_tool INTEGER DEFAULT 0,
@@ -206,18 +207,18 @@ public class DBManager {
                               int tokenInput, int tokenCache, int tokenTool, int tokenThought, int tokenOutput, int tokenTotal) {
         return addMessage(sessionId, msgId, role, content,
                 modelId, tokenInput, tokenCache, tokenTool, tokenThought, tokenOutput, tokenTotal,
-                null, 0, 0, 0, 0, 0, 0);
+                null, new ArrayList<>(), 0, 0, 0, 0, 0, 0);
     }
 
     public boolean addMessage(long sessionId, long msgId, String role, String content, String modelId,
                               int tokenInput, int tokenCache, int tokenTool, int tokenThought, int tokenOutput, int tokenTotal,
-                              String imagePrompt, int imageTokenInput, int imageTokenCache, int imageTokenTool,
+                              String imagePrompt, List<String> refIds, int imageTokenInput, int imageTokenCache, int imageTokenTool,
                               int imageTokenThought, int imageTokenOutput, int imageTokenTotal) {
         String sql = """
                 INSERT INTO messages
                 (session_id, msg_id, role, content, model_id,
                 token_input, token_cache, token_tool, token_thought, token_output, token_total,
-                image_content, image_token_input, image_token_cache, image_token_tool,
+                image_content, reference_image_ids, image_token_input, image_token_cache, image_token_tool,
                 image_token_thought, image_token_output, image_token_total)
                 VALUES (?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
@@ -239,12 +240,13 @@ public class DBManager {
             pstmt.setInt(10, tokenOutput);
             pstmt.setInt(11, tokenTotal);
             pstmt.setString(12, imagePrompt);
-            pstmt.setInt(13, imageTokenInput);
-            pstmt.setInt(14, imageTokenCache);
-            pstmt.setInt(15, imageTokenTool);
-            pstmt.setInt(16, imageTokenThought);
-            pstmt.setInt(17, imageTokenOutput);
-            pstmt.setInt(18, imageTokenTotal);
+            pstmt.setString(13, String.join(",", refIds));
+            pstmt.setInt(14, imageTokenInput);
+            pstmt.setInt(15, imageTokenCache);
+            pstmt.setInt(16, imageTokenTool);
+            pstmt.setInt(17, imageTokenThought);
+            pstmt.setInt(18, imageTokenOutput);
+            pstmt.setInt(19, imageTokenTotal);
             pstmt.executeUpdate();
 
             return true;

@@ -154,34 +154,32 @@ public class ChatService {
                     logger.info("봇의 메시지: {}", preText);
 
                     @SuppressWarnings("unchecked")
-                    List<String> refIds = (List<String>) args.get("reference_ids");
+                    List<String> refIds = (List<String>) args.getOrDefault("reference_ids", new ArrayList<>());
                     List<Part> referenceParts = new ArrayList<>();
 
-                    if (refIds != null && !refIds.isEmpty()) {
-                        for (String idStr : refIds) {
-                            boolean found = false;
+                    for (String idStr : refIds) {
+                        boolean found = false;
 
-                            for (Content content : fullHistory) {
-                                List<Part> parts = content.parts().orElse(new ArrayList<>());
+                        for (Content content : fullHistory) {
+                            List<Part> parts = content.parts().orElse(new ArrayList<>());
 
-                                for (int i = 0; i < parts.size(); i++) {
-                                    String text = parts.get(i).text().orElse("");
+                            for (int i = 0; i < parts.size(); i++) {
+                                String text = parts.get(i).text().orElse("");
 
-                                    if (text.contains(imageFormat.formatted(idStr))) {
-                                        if (i + 1 < parts.size()) {
-                                            referenceParts.add(parts.get(i + 1));
-                                            logger.info("이미지 ID: {} 참조", idStr);
-                                            found = true;
-                                            break;
-                                        }
+                                if (text.contains(imageFormat.formatted(idStr))) {
+                                    if (i + 1 < parts.size()) {
+                                        referenceParts.add(parts.get(i + 1));
+                                        logger.info("이미지 ID: {} 참조", idStr);
+                                        found = true;
+                                        break;
                                     }
                                 }
-                                if (found) break;
                             }
+                            if (found) break;
+                        }
 
-                            if (!found) {
-                                logger.warn("대화 내역에서 레퍼런스 이미지를 찾을 수 없음 (ID: {})", idStr);
-                            }
+                        if (!found) {
+                            logger.warn("대화 내역에서 레퍼런스 이미지를 찾을 수 없음 (ID: {})", idStr);
                         }
                     }
 
@@ -211,7 +209,7 @@ public class ChatService {
                                 db.addMessage(sessionId, botMsg.getIdLong(), "model",
                                         preText + postText, info.model(),
                                         tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5],
-                                        imagePrompt, imageTokens[0], imageTokens[1], imageTokens[2],
+                                        imagePrompt, refIds, imageTokens[0], imageTokens[1], imageTokens[2],
                                         imageTokens[3], imageTokens[4], imageTokens[5]);
 
                                 FileUtil.upload(message.getJDA(), imageBytes, fileName, sessionId)
