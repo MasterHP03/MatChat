@@ -14,10 +14,14 @@ import org.mat.util.FileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
 import java.net.URI;
+import java.net.URLConnection;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -34,9 +38,6 @@ import java.util.concurrent.CompletableFuture;
 public class ChatService {
     private final DBManager db;
     private final Logger logger = LoggerFactory.getLogger(ChatService.class);
-    private static final HttpClient httpClient = HttpClient.newHttpClient();
-
-    private static final String imageFormat = "[Reference Id: %s]";
 
     public ChatService(DBManager db) {
         this.db = db;
@@ -166,7 +167,7 @@ public class ChatService {
                             for (int i = 0; i < parts.size(); i++) {
                                 String text = parts.get(i).text().orElse("");
 
-                                if (text.contains(imageFormat.formatted(idStr))) {
+                                if (text.contains(FileUtil.imageFormat.formatted(idStr))) {
                                     if (i + 1 < parts.size()) {
                                         referenceParts.add(parts.get(i + 1));
                                         logger.info("이미지 ID: {} 참조", idStr);
@@ -289,19 +290,20 @@ public class ChatService {
             for (Part p : c.parts().orElse(new ArrayList<>())) {
                 String text = p.text().orElse(null);
 
-                if (text != null && text.startsWith("[IMG:")) {
+                if (text != null && text.startsWith("[IMG|")) {
                     try {
-                        // Getting rid of "[IMG:", "]", leaving "ID:URL" (https has colon, so proper is ID being front
+                        // Getting rid of "[IMG|", "]", leaving "ID|URI|URL"
                         String inner = text.substring(5, text.length() - 1);
 
-                        int firstColon = inner.indexOf(":");
-                        long archiveId = Long.parseLong(inner.substring(0, firstColon));
-                        String url = inner.substring(firstColon + 1);
+                        String[] tokens = inner.split("[|]", 3);
+                        long archiveId = Long.parseLong(tokens[0]);
+                        String geminiUri = tokens[1].equals("null") ? null : tokens[1];
+                        String url = tokens[2];
 
                         // ID Tag for Reference Image Call
-                        readyParts.add(Part.fromText(imageFormat.formatted(archiveId)));
+                        readyParts.add(Part.fromText(FileUtil.imageFormat.formatted(archiveId)));
 
-                        readyParts.add(toImagePart(jda, url, archiveId));
+                        readyParts.add(toImagePart(jda, url, archiveId, geminiUri));
                     } catch (Exception e) {
                         logger.error("이미지 태그 파싱 중 에러 발생: {}", text, e);
                         readyParts.add(Part.fromText("[이미지 파싱 실패]"));
@@ -321,46 +323,42 @@ public class ChatService {
         return readyHistory;
     }
 
-    private Part toImagePart(JDA jda, String oldUrl, long archiveMsgId) {
-        HttpResponse<byte[]> response = download(oldUrl);
-        String finalUrl = oldUrl;
-
+    private Part toImagePart(JDA jda, String oldUrl, long archiveMsgId, String geminiUri) {
         try {
-            if (response == null || response.statusCode() == 403 || response.statusCode() == 404) {
-                logger.warn("HTTP 링크 만료, 디스코드 접근 시도");
-
-                TextChannel archive = jda.getTextChannelById(Config.getArchive());
-                if (archive == null) {
-                    throw new RuntimeException("유효한 채널이 아님 (ID 실수?)");
-                }
-                Message msg = archive.retrieveMessageById(archiveMsgId).complete();
-
-                String freshUrl = msg.getAttachments().getFirst().getUrl();
-                finalUrl = freshUrl;
-                db.updateImageUrl(archiveMsgId, freshUrl);
-
-                response = download(freshUrl);
-                if (response == null || response.statusCode() != 200) {
-                    throw new RuntimeException("새로 불러온 링크로도 다운로드 실패");
-                }
+            String mimeType = oldUrl.contains(".png") ? "image/png" : "image/jpeg";
+            if (geminiUri != null && !geminiUri.isBlank()) {
+                logger.info("이미지 캐시 적중, 다운로드 스킵 (ID: {})", archiveMsgId);
+                FileData fileData = FileData.builder()
+                        .fileUri(geminiUri)
+                        .mimeType(mimeType)
+                        .build();
+                return Part.builder().fileData(fileData).build();
             }
-            byte[] imageBytes = response.body();
-            String mimeType = finalUrl.contains(".png") ? "image/png" : "image/jpeg";
-            return Part.fromBytes(imageBytes, mimeType);
+
+            logger.info("이미지 캐시 미스, 다운로드/구글 업로드 진행 (ID: {})", archiveMsgId);
+            FileUtil.ImageInfo image = FileUtil.getSafeImageBytes(jda, db, oldUrl, archiveMsgId);
+            if (image == null) throw new RuntimeException("가져온 이미지 데이터가 null입니다.");
+
+            String cleanUrl = oldUrl.split("\\?")[0];
+            String fileName = cleanUrl.substring(cleanUrl.lastIndexOf("/") + 1);
+            fileName = URLDecoder.decode(fileName, StandardCharsets.UTF_8);
+
+            String newUri = FileUtil.uploadToGemini(image.bytes(), image.mimeType(), fileName);
+
+            if (newUri != null) {
+                db.updateGeminiUri(archiveMsgId, newUri);
+                FileData fileData = FileData.builder()
+                        .fileUri(newUri)
+                        .mimeType(image.mimeType())
+                        .build();
+                return Part.builder().fileData(fileData).build();
+            } else {
+                logger.warn("구글 업로드 실패, 바이트 배열로 폴백 (ID: {})", archiveMsgId);
+                return Part.fromBytes(image.bytes(), image.mimeType());
+            }
         } catch (Exception e) {
             logger.error("디스코드 이미지 다운로드 실패", e);
             return Part.fromText("[이미지 로드 실패]");
-        }
-    }
-
-    private HttpResponse<byte[]> download(String imageUrl) {
-        try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(imageUrl)).build();
-
-            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
-        } catch (Exception e) {
-            logger.error("HTTP 이미지 다운로드 실패 ({})", imageUrl, e);
-            return null;
         }
     }
 

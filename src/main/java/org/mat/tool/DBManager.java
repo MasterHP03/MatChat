@@ -73,8 +73,10 @@ public class DBManager {
                         msg_id INTEGER NOT NULL,
                         type TEXT NOT NULL,
                         url TEXT NOT NULL,
+                        gemini_uri TEXT,
                         archive_msg_id INTEGER NOT NULL,
                         user_order INTEGER DEFAULT 0,
+                        uri_created_at DATETIME,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (session_id, msg_id)
                         REFERENCES messages(session_id, msg_id) ON DELETE CASCADE
@@ -152,7 +154,8 @@ public class DBManager {
                 // 이미지 추가
                 List<FileUtil.AttachmentInfo> attachments = getAttachments(sessionId, msgId);
                 for (FileUtil.AttachmentInfo att : attachments) {
-                    parts.add(Part.fromText("[IMG:" + att.archiveMsgId() + ":" + att.url() + "]"));
+                    parts.add(Part.fromText(FileUtil.imageTagFormat.formatted(
+                            att.archiveMsgId(), att.geminiUri(), att.url())));
                 }
 
                 Content content = Content.builder()
@@ -502,7 +505,12 @@ public class DBManager {
     public List<FileUtil.AttachmentInfo> getAttachments(long sessionId, long msgId) {
         List<FileUtil.AttachmentInfo> atts = new ArrayList<>();
         String sql = """
-                SELECT url, archive_msg_id
+                SELECT url, archive_msg_id,
+                    CASE
+                        WHEN uri_created_at IS NOT NULL AND uri_created_at >= datetime('now', '-46 hours')
+                        THEN gemini_uri
+                        ELSE NULL
+                    END AS gemini_uri
                 FROM attachments
                 WHERE session_id = ? AND msg_id = ?
                 ORDER BY user_order ASC, id ASC
@@ -517,7 +525,8 @@ public class DBManager {
             while (rs.next()) {
                 atts.add(new FileUtil.AttachmentInfo(
                         rs.getString("url"),
-                        rs.getLong("archive_msg_id")));
+                        rs.getLong("archive_msg_id"),
+                        rs.getString("gemini_uri")));
             }
         } catch (SQLException e) {
             printStackTrace(e);
@@ -539,6 +548,27 @@ public class DBManager {
             pstmt.executeUpdate();
 
             logger.info("첨부파일 링크 업데이트됨 ({})", url);
+            return true;
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return false;
+    }
+
+    public boolean updateGeminiUri(long archiveMsgId, String geminiUri) {
+        String sql = """
+                UPDATE attachments
+                SET gemini_uri = ?, uri_created_at = CURRENT_TIMESTAMP
+                WHERE archive_msg_id = ?
+                """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, geminiUri);
+            pstmt.setLong(2, archiveMsgId);
+            pstmt.executeUpdate();
+
+            logger.info("Files API 캐시 업데이트됨 ({})", geminiUri);
             return true;
         } catch (SQLException e) {
             printStackTrace(e);
