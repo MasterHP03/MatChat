@@ -2,7 +2,6 @@ package org.mat.util;
 
 import com.google.genai.Client;
 import com.google.genai.types.File;
-import com.google.genai.types.Part;
 import com.google.genai.types.UploadFileConfig;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Message;
@@ -13,15 +12,10 @@ import org.mat.tool.DBManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
 import java.net.URI;
-import java.net.URLConnection;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletableFuture;
 
 public class FileUtil {
@@ -49,7 +43,7 @@ public class FileUtil {
                     .queue(message -> {
                         String imageUrl = message.getAttachments().getFirst().getUrl();
                         long archiveMsgId = message.getIdLong();
-                        future.complete(new AttachmentInfo(imageUrl, archiveMsgId));
+                        future.complete(new AttachmentInfo(imageUrl, archiveMsgId, null));
                     }, future::completeExceptionally);
         } else {
             future.completeExceptionally(new RuntimeException("아카이브에 파일 업로드 중 에러 (아카이브 채널 ID 실수?)"));

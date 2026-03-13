@@ -83,7 +83,7 @@ public class Config {
 
     public static long getArchive() {
         try {
-            String toParse = dotenv.get("ARCHIVE_CHANNEL");
+            String toParse = dotenv.get("ARCHIVE_CHANNEL", "-1");
             return Long.parseLong(toParse);
         } catch (Exception e) {
             return -1;
