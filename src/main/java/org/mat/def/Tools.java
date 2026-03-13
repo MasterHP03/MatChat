@@ -11,6 +11,10 @@ public enum Tools {
             Use this tool when User asks to generate a picture, painting or image.
             Don't explicitly send JSON FunctionCall data as a part of response.
             """,
+            //[IF the tool 'search' is enabled]
+            //You cannot use 'search' and this tool simultaneously.
+            //So when you use this tool, DO NOT use 'search' tool.
+            //""",
             Schema.builder()
                     .type("OBJECT")
                     .properties(Map.of(
