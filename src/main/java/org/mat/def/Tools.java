@@ -7,7 +7,7 @@ import java.util.Map;
 public enum Tools {
     IMAGE("generate_image",
             """
-            Generate an image based on given prompt.
+            Generates an image based on given prompt.
             Use this tool when User asks to generate a picture, painting or image.
             Don't explicitly send JSON FunctionCall data as a part of response.
             """,
@@ -44,7 +44,13 @@ public enum Tools {
                             ))
                     .required("prompt")
                     .build()
-    );
+    ),
+    SEARCH("search",
+            """
+            Uses search on Internet to ground the response with real-time information.
+            Use this tool only if you need real-time info to respond to user's input.
+            """,
+            null);
 
     private final String toolName;
     private final String desc;

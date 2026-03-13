@@ -5,6 +5,7 @@ import com.google.genai.types.*;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.utils.FileUpload;
+import org.mat.def.GeminiModel;
 import org.mat.def.ImageType;
 import org.mat.def.Tools;
 import org.mat.exception.NoResponseException;
@@ -110,11 +111,44 @@ public class ChatService {
         try {
             message.getChannel().sendTyping().queue();
 
+            boolean isSearchRequested = db.isToolEnabled(sessionId, Tools.SEARCH);
+            boolean allowGoogleSearch = false;
+            boolean isQueryWise = false;
+
+            String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            String thisMonth = today.substring(0, 7) + "-%"; // "2026-03-%"
+
+            if (isSearchRequested) {
+                if (info.model().startsWith("gemini-3")) {
+                    // Gemini 3 계열: 통합 월간 5k 쿼리
+                    isQueryWise = true;
+                    int monthUsage = db.getGoogleSearchCount(thisMonth, "gemini-3%");
+                    if (monthUsage < 4950) allowGoogleSearch = true;
+                    else logger.warn("Gemini 3 통합 월간 검색 한도 초과");
+                } else if (info.model().equals(GeminiModel.PRO25.getId())) {
+                    // Gemini 2.5 Pro: 일간 1.5k 쿼리
+                    int dailyUsage = db.getGoogleSearchCount(today, "gemini-2.5-pro");
+                    if (dailyUsage < 1450) allowGoogleSearch = true;
+                    else logger.warn("Gemini 2.5 Pro 일간 검색 한도 초과");
+                } else {
+                    // Gemini 2 플래시 계열: 통합 일간 1.5k 쿼리
+                    int dailyUsage = db.getGoogleSearchCount(today, "gemini-2._-flash");
+                    if (dailyUsage < 1450) allowGoogleSearch = true;
+                    else logger.warn("Gemini 2 Flash 통합 일간 검색 한도 초과");
+                }
+            }
+
+            // TODO Brave Search API Fallback Logic
+
             // Gemini 호출
             GenerateContentResponse response = GeminiManager.generate(systemPrompt, fullHistory,
-                    info.model(), info.userNote(), db.isToolEnabled(sessionId, Tools.IMAGE));
+                    info.model(), info.userNote(),
+                    db.isToolEnabled(sessionId, Tools.IMAGE),
+                    allowGoogleSearch);
 
-            Content responseContent = response.candidates().orElseThrow().getFirst().content().orElse(null);
+            List<Candidate> candidates = response.candidates().orElse(new ArrayList<>());
+
+            Content responseContent = candidates.getFirst().content().orElse(null);
             if (responseContent == null) throw new Exception("응답으로 반환된 Content가 null입니다.");
             List<Part> responseParts = responseContent.parts().orElse(new ArrayList<>());
             boolean isFunctionCall = false;
@@ -123,11 +157,51 @@ public class ChatService {
             // 토큰 사용량 계산
             int[] tokens = getTokenCount(response);
 
+            // Function Call인지 아닌지 검사
             for (Part part : responseParts) {
                 if (part.functionCall().isPresent()) {
                     isFunctionCall = true;
                     funcCall = part.functionCall().get();
                     break;
+                }
+            }
+
+            StringBuilder sourceText = new StringBuilder();
+
+            // Search Tool 사용량 저장
+            if (allowGoogleSearch && !candidates.isEmpty()) {
+                Candidate cand = candidates.getFirst();
+                GroundingMetadata ground = cand.groundingMetadata().orElse(null);
+
+                if (ground != null) {
+                    if (ground.searchEntryPoint().isPresent()) {
+                        int queriesUsed = 1;
+                        if (isQueryWise) {
+                            queriesUsed = ground.webSearchQueries().orElse(new ArrayList<>()).size();
+                        }
+                        db.addGoogleSearchCount(today, info.model(), queriesUsed);
+                        logger.info("답변 생성 중 구글 검색 {}회 사용됨, 카운트 증가 완료", queriesUsed);
+                    }
+
+                    if (ground.groundingChunks().isPresent()) {
+                        StringBuilder tempSourceText = new StringBuilder("답변 참고 자료:\n");
+                        int sourceCount = 0;
+                        for (GroundingChunk chunk : ground.groundingChunks().get()) {
+                            if (chunk.web().isPresent()) {
+                                var web = chunk.web().get();
+                                String title = web.title().orElse("참고 링크");
+                                String uri = web.uri().orElse("");
+
+                                if (!uri.isBlank()) {
+                                    tempSourceText.append("- [").append(title).append("](").append(uri).append(")\n");
+                                }
+                            }
+                        }
+
+                        if (sourceCount > 0) {
+                            sourceText.append(tempSourceText);
+                        }
+                    }
                 }
             }
 
@@ -174,7 +248,46 @@ public class ChatService {
                         }
                     }
 
-                    GenerateContentResponse funcResponse = GeminiManager.generateImage(imagePrompt, referenceParts);
+                    GenerateContentResponse funcResponse = GeminiManager.generateImage(imagePrompt,
+                            referenceParts, allowGoogleSearch);
+                    List<Candidate> funcCandidates =  funcResponse.candidates().orElse(new ArrayList<>());
+                    // Search Tool 사용량 저장
+                    if (allowGoogleSearch && !funcCandidates.isEmpty()) {
+                        Candidate funcCand = funcCandidates.getFirst();
+                        GroundingMetadata funcGround = funcCand.groundingMetadata().orElse(null);
+
+                        if (funcGround != null) {
+                            if (funcGround.searchEntryPoint().isPresent()) {
+                                int imgQueries = 1;
+                                if (isQueryWise) {
+                                    imgQueries = funcGround.webSearchQueries().orElse(new ArrayList<>()).size();
+                                }
+                                db.addGoogleSearchCount(today, "gemini-3.1-flash-image", imgQueries);
+                                logger.info("이미지 생성 중 구글 검색 {}회 사용됨, 카운트 증가 완료", imgQueries);
+                            }
+
+                            if (funcGround.groundingChunks().isPresent()) {
+                                StringBuilder tempSourceText = new StringBuilder("이미지 참고 자료:\n");
+                                int sourceCount = 0;
+                                for (GroundingChunk chunk : funcGround.groundingChunks().get()) {
+                                    if (chunk.web().isPresent()) {
+                                        var web = chunk.web().get();
+                                        String title = web.title().orElse("참고 링크");
+                                        String uri = web.uri().orElse("");
+
+                                        if (!uri.isBlank()) {
+                                            tempSourceText.append("- [").append(title).append("](").append(uri).append(")\n");
+                                        }
+                                    }
+                                }
+
+                                if (sourceCount > 0) {
+                                    sourceText.append(tempSourceText);
+                                }
+                            }
+                        }
+                    }
+
                     List<Part> funcParts = funcResponse.candidates().orElseThrow()
                             .getFirst().content().orElseThrow().parts().orElseThrow();
                     StringBuilder postText = new StringBuilder();
@@ -194,14 +307,19 @@ public class ChatService {
                     DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss");
                     String fileName = LocalDateTime.now().format(dtf) + ".png";
 
+                    String funcText = preText + postText;
+                    String displayText = funcText + (sourceText.isEmpty() ? "" : "\n\n" + sourceText);
+
+
                     message.replyFiles(FileUpload.fromData(imageBytes, fileName))
-                            .setContent(preText + postText)
+                            .setContent(displayText)
                             .queue(botMsg -> {
                                 db.addMessage(sessionId, botMsg.getIdLong(), "model",
-                                        preText + postText, info.model(),
+                                        funcText, info.model(),
                                         tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5],
                                         imagePrompt, refIds, imageTokens[0], imageTokens[1], imageTokens[2],
-                                        imageTokens[3], imageTokens[4], imageTokens[5]);
+                                        imageTokens[3], imageTokens[4], imageTokens[5],
+                                        sourceText.toString());
 
                                 FileUtil.upload(message.getJDA(), imageBytes, fileName, sessionId)
                                         .thenAccept(result -> {
@@ -214,7 +332,7 @@ public class ChatService {
                                                         0);
                                             }
                                         });
-                                }, e -> {
+                            }, e -> {
                                 logger.error("이미지 전송 실패!");
                                 throw new RuntimeException("이미지 전송 실패 ", e);
                             });
@@ -223,16 +341,17 @@ public class ChatService {
             }
 
             String responseText = response.text() == null ? "응답 없음" : response.text();
+            String displayResponseText = responseText + (sourceText.isEmpty() ? "" : "\n\n" + sourceText.toString());
 
             // 메시지 분할 전송
-            int length = responseText.length();
+            int length = displayResponseText.length();
             int count = 0;
             final int CHUNK_SIZE = Config.getChunkSize();
             boolean isFirstChunk = true;
 
             while (count < length) {
                 final boolean finalIsFirstChunk = isFirstChunk;
-                String splitText = responseText.substring(count, Math.min(count + CHUNK_SIZE, length));
+                String splitText = displayResponseText.substring(count, Math.min(count + CHUNK_SIZE, length));
 
                 message.reply(splitText).queue(botMsg -> {
                     if (finalIsFirstChunk) {
@@ -241,7 +360,8 @@ public class ChatService {
                         // 청크 나눠보낼 때, 첫 청크를 보낼 때만 저장되도록
                         db.addMessage(sessionId, botMsg.getIdLong(), "model", responseText,
                                 info.model(),
-                                tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5]
+                                tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5],
+                                sourceText.toString()
                         );
                     }
                 });

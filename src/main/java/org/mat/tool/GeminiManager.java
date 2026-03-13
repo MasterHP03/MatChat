@@ -14,6 +14,10 @@ import java.util.List;
 public class GeminiManager {
 
     private static final Tool imageTool = getTool(Tools.IMAGE);
+    private static final Tool searchTool = Tool.builder()
+            .googleSearch(GoogleSearch.builder()
+                    .build())
+            .build();
 
     /**
      * Sends a requests to Gemini API and gets a response.
@@ -27,7 +31,7 @@ public class GeminiManager {
      */
     public static GenerateContentResponse generate(String systemPrompt, List<Content> history,
                                                    String model, String userNote,
-                                                   boolean enableImageTool) throws RuntimeException {
+                                                   boolean enableImageTool, boolean enableSearchTool) throws RuntimeException {
         try (Client client = Client.builder()
                 .apiKey(Config.getGeminiKey())
                 .httpOptions(HttpOptions.builder()
@@ -45,9 +49,8 @@ public class GeminiManager {
                             Part.fromText(finalPrompt)))
                     .maxOutputTokens(Config.getMaxOutputToken());
             List<Tool> tools = new ArrayList<>();
-            if (enableImageTool) {
-                tools.add(imageTool);
-            }
+            if (enableImageTool) tools.add(imageTool);
+            if (enableSearchTool) tools.add(searchTool);
             if (!tools.isEmpty()) configBuilder.tools(tools);
 
             GenerateContentConfig config = configBuilder.build();
@@ -74,7 +77,7 @@ public class GeminiManager {
         }
     }
 
-    public static GenerateContentResponse generateImage(String prompt, List<Part> referenceImages) {
+    public static GenerateContentResponse generateImage(String prompt, List<Part> referenceImages, boolean enableSearchTool) {
         try (Client client = Client.builder()
                 .apiKey(Config.getGeminiKey())
                 .httpOptions(HttpOptions.builder()
@@ -91,12 +94,15 @@ public class GeminiManager {
 
             Content inputContent = Content.builder().parts(inputParts).build();
 
+            GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
+                    .responseModalities("TEXT", "IMAGE");
+            List<Tool> tools = new ArrayList<>();
+            if (enableSearchTool) tools.add(searchTool);
+            if (!tools.isEmpty()) configBuilder.tools(tools);
+            GenerateContentConfig config = configBuilder.build();
+
             GenerateContentResponse response = client.models.generateContent(
-                    "gemini-3.1-flash-image-preview",
-                    inputContent,
-                    GenerateContentConfig.builder()
-                            .responseModalities("TEXT", "IMAGE")
-                            .build()
+                    "gemini-3.1-flash-image-preview", inputContent, config
             );
 
             // 응답이 없을 경우, 필터 때문인지 검사

@@ -80,7 +80,7 @@ public class MessageEvent extends ListenerAdapter {
             long sessionId = thread.getIdLong();
             if (!db.isSessionExists(sessionId)) return;
 
-            db.addMessage(sessionId,message.getIdLong(), "user", message.getContentRaw());
+            db.addMessage(sessionId,message.getIdLong(), "user", message.getContentRaw(), "");
 
             List<Message.Attachment> attachments = message.getAttachments();
             List<CompletableFuture<Void>> imageFutures = new ArrayList<>();

@@ -35,6 +35,7 @@ public class DBManager {
                         model TEXT,
                         user_note TEXT DEFAULT '',
                         use_generate_image INTEGER DEFAULT 0,
+                        use_search INTEGER DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     );
                     """);
@@ -60,6 +61,7 @@ public class DBManager {
                         image_token_thought INTEGER DEFAULT 0,
                         image_token_output INTEGER DEFAULT 0,
                         image_token_total INTEGER DEFAULT 0,
+                        search_sources TEXT,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (session_id)
                         REFERENCES sessions(session_id),
@@ -80,6 +82,15 @@ public class DBManager {
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (session_id, msg_id)
                         REFERENCES messages(session_id, msg_id) ON DELETE CASCADE
+                    );
+                    """);
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS api_usage (
+                        record_date TEXT,
+                        model_id TEXT,
+                        google_search_count INTEGER DEFAULT 0,
+                        brave_search_count INTEGER DEFAULT 0,
+                        PRIMARY KEY (record_date, model_id)
                     );
                     """);
 
@@ -202,31 +213,39 @@ public class DBManager {
         return sessionId;
     }
 
-    public boolean addMessage(long sessionId, long msgId, String role, String content) {
-        return addMessage(sessionId, msgId, role, content, null, 0, 0, 0, 0, 0, 0);
+    public boolean addMessage(long sessionId, long msgId, String role, String content,
+                              String searchSources) {
+        return addMessage(sessionId, msgId, role, content, null,
+                0, 0, 0, 0, 0, 0,
+                searchSources);
     }
 
     public boolean addMessage(long sessionId, long msgId, String role, String content, String modelId,
-                              int tokenInput, int tokenCache, int tokenTool, int tokenThought, int tokenOutput, int tokenTotal) {
+                              int tokenInput, int tokenCache, int tokenTool, int tokenThought, int tokenOutput, int tokenTotal,
+                              String searchSources) {
         return addMessage(sessionId, msgId, role, content,
                 modelId, tokenInput, tokenCache, tokenTool, tokenThought, tokenOutput, tokenTotal,
-                null, new ArrayList<>(), 0, 0, 0, 0, 0, 0);
+                null, new ArrayList<>(), 0, 0, 0, 0, 0, 0,
+                searchSources);
     }
 
     public boolean addMessage(long sessionId, long msgId, String role, String content, String modelId,
                               int tokenInput, int tokenCache, int tokenTool, int tokenThought, int tokenOutput, int tokenTotal,
                               String imagePrompt, List<String> refIds, int imageTokenInput, int imageTokenCache, int imageTokenTool,
-                              int imageTokenThought, int imageTokenOutput, int imageTokenTotal) {
+                              int imageTokenThought, int imageTokenOutput, int imageTokenTotal,
+                              String searchSources) {
         String sql = """
                 INSERT INTO messages
                 (session_id, msg_id, role, content, model_id,
                 token_input, token_cache, token_tool, token_thought, token_output, token_total,
                 image_content, reference_image_ids, image_token_input, image_token_cache, image_token_tool,
-                image_token_thought, image_token_output, image_token_total)
+                image_token_thought, image_token_output, image_token_total,
+                search_sources)
                 VALUES (?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, ?, ?)
+                ?, ?, ?,
+                ?)
                 """;
 
         try (Connection conn = getConnection();
@@ -250,6 +269,7 @@ public class DBManager {
             pstmt.setInt(17, imageTokenThought);
             pstmt.setInt(18, imageTokenOutput);
             pstmt.setInt(19, imageTokenTotal);
+            pstmt.setString(20, searchSources);
             pstmt.executeUpdate();
 
             return true;
@@ -569,6 +589,65 @@ public class DBManager {
             pstmt.executeUpdate();
 
             logger.info("Files API 캐시 업데이트됨 ({})", geminiUri);
+            return true;
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return false;
+    }
+
+    /**
+     * Search for Google Search usage count.
+     * @param datePattern "2026-03-13" (Date-wise) or "2026-03-%" (Month-wise)
+     * @param modelPattern "gemini-2.5-pro" (Individual) or "gemini-3%" (Shared)
+     * @return Google Search usage count of the model(s) in the given period.
+     */
+    public int getGoogleSearchCount(String datePattern, String modelPattern) {
+        String sql = """
+                SELECT SUM(google_search_count)
+                FROM api_usage
+                WHERE record_date LIKE ? AND model_id LIKE ?
+                """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, datePattern);
+            pstmt.setString(2, modelPattern);
+            ResultSet rs = pstmt.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            printStackTrace(e);
+        }
+        return 0;
+    }
+
+    /**
+     * Update Google Search usage data.
+     * @param date "2026-03-13" (Date)
+     * @param modelId "gemini-3.1-pro" (ModelID)
+     * @param count Total count of Google Search usage this turn.
+     * @return Boolean that indicates if the operation was successful.
+     */
+    public boolean addGoogleSearchCount(String date, String modelId, int count) {
+        String sql = """
+                INSERT INTO api_usage (record_date, model_id, google_search_count)
+                VALUES (?, ?, ?)
+                ON CONFLICT(record_date, model_id) DO
+                UPDATE SET google_search_count = google_search_count + ?;
+        """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, date);
+            pstmt.setString(2, modelId);
+            pstmt.setInt(3, count);
+            pstmt.setInt(4, count);
+            pstmt.executeUpdate();
+
+            logger.info("구글 검색 카운트 {} 증가 ({} / {})", count, date, modelId);
             return true;
         } catch (SQLException e) {
             printStackTrace(e);
