@@ -347,7 +347,7 @@ public class ChatService {
         List<Candidate> funcCandidates = funcResponse.candidates().orElse(new ArrayList<>());
         // 출처 리스트 추출
         String imageSourceText = extractSearchSources(funcCandidates, allowGoogleSearch, isQueryWise, today,
-                "gemini-3.1-flash-image", "이미지 참고 자료:\n");
+                "gemini-3.1-flash-image-preview", "이미지 참고 자료:\n");
         String finalSourceText = initialSourceText +
                 (initialSourceText.isBlank() || imageSourceText.isBlank() ? "" : "\n") + imageSourceText;
 
