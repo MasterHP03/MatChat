@@ -115,17 +115,29 @@ public class ChatService {
             String thisMonth = today.substring(0, 7) + "-%"; // "2026-03-%"
             boolean isQueryWise = info.model().startsWith("gemini-3");
 
-            boolean allowGoogleSearch = checkSearchQuota(sessionId, info.model(), today, thisMonth);
-
             // TODO Brave Search API Fallback Logic
+            boolean userWantsSearch = checkSearchQuota(sessionId, info.model(), today, thisMonth);
+            boolean userWantsImage = db.isToolEnabled(sessionId, Tools.IMAGE);
 
-            // TODO Image, Search 둘 다 허용됐을 때 하나는 꺼야 함
-            boolean enableImage = db.isToolEnabled(sessionId, Tools.IMAGE);
+            boolean mainSearch = userWantsSearch;
+            boolean mainImage = userWantsImage;
+
+            // 아직은 내장 툴과 커스텀 Function이 공존할 수 없으니, 임시 라우팅
+            if (mainSearch && mainImage) {
+                String msgText = message.getContentRaw();
+                if (msgText.contains("그려")) {
+                    mainSearch = false;
+                    logger.info("이미지 라우팅: 메인 모델의 검색을 임시로 끕니다.");
+                } else {
+                    mainImage = false;
+                    logger.info("일반 라우팅: 메인 모델의 이미지 툴을 임시로 끕니다.");
+                }
+            }
 
             // Gemini 호출
             GenerateContentResponse response = GeminiManager.generate(systemPrompt, fullHistory,
                     info.model(), info.userNote(),
-                    enableImage, allowGoogleSearch);
+                    mainImage, mainSearch);
 
             List<Candidate> candidates = response.candidates().orElse(new ArrayList<>());
             Content responseContent = candidates.getFirst().content().orElseThrow(() ->
@@ -135,8 +147,8 @@ public class ChatService {
             // 토큰 사용량 계산
             int[] tokens = getTokenCount(response);
 
-            // 출처 리스트 추출
-            String sourceText = extractSearchSources(candidates, allowGoogleSearch, isQueryWise,
+            // 메인 출처 리스트 추출
+            String sourceText = extractSearchSources(candidates, mainSearch, isQueryWise,
                     today, info.model(), "답변 참고 자료:\n");
 
             // Function Call인지 아닌지 검사
@@ -145,7 +157,7 @@ public class ChatService {
                     FunctionCall funcCall = part.functionCall().get();
                     if (Tools.IMAGE.getToolName().equals(funcCall.name().orElse(""))) {
                         handleImageTool(sessionId, message, fullHistory, info, funcCall,
-                                allowGoogleSearch, isQueryWise, today, tokens, sourceText);
+                                userWantsSearch, isQueryWise, today, tokens, sourceText);
                         return;
                     }
                 }
