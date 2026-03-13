@@ -318,11 +318,7 @@ public class ChatService {
             String mimeType = oldUrl.contains(".png") ? "image/png" : "image/jpeg";
             if (geminiUri != null && !geminiUri.isBlank()) {
                 logger.info("이미지 캐시 적중, 다운로드 스킵 (ID: {})", archiveMsgId);
-                FileData fileData = FileData.builder()
-                        .fileUri(geminiUri)
-                        .mimeType(mimeType)
-                        .build();
-                return Part.builder().fileData(fileData).build();
+                return Part.fromUri(geminiUri, mimeType);
             }
 
             logger.info("이미지 캐시 미스, 다운로드/구글 업로드 진행 (ID: {})", archiveMsgId);
@@ -337,11 +333,7 @@ public class ChatService {
 
             if (newUri != null) {
                 db.updateGeminiUri(archiveMsgId, newUri);
-                FileData fileData = FileData.builder()
-                        .fileUri(newUri)
-                        .mimeType(image.mimeType())
-                        .build();
-                return Part.builder().fileData(fileData).build();
+                return Part.fromUri(newUri, mimeType);
             } else {
                 logger.warn("구글 업로드 실패, 바이트 배열로 폴백 (ID: {})", archiveMsgId);
                 return Part.fromBytes(image.bytes(), image.mimeType());
