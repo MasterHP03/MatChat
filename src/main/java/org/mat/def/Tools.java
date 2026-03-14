@@ -10,6 +10,11 @@ public enum Tools {
             Generates an image based on given prompt.
             Use this tool when User asks to generate a picture, painting or image.
             Don't explicitly send JSON FunctionCall data as a part of response.
+            
+            This tool has real-time Google Search capabilities.
+            You DO NOT need to search or reason about real-time events (like current weather, time, news) yourself before calling this tool.
+            Instead, pass a prompt directly asking the tool to search and draw.
+            (e.g., 'Search for the current weather in Suwon and draw it.')
             """,
             //[IF the tool 'search' is enabled]
             //You cannot use 'search' and this tool simultaneously.
@@ -23,6 +28,10 @@ public enum Tools {
                                     .description("""
                                             Detailed, describing English prompt about the image to generate
                                             (e.g. A highly detailed digital painting of a cute orange cat)
+                                            
+                                            The prompt string MUST be a valid, strictly escaped JSON string.
+                                            If you need to include line breaks in the text, you MUST use the literal escaped characters '\\n' (a backslash followed by 'n').
+                                            DO NOT use actual raw line breaks (pressing Enter/ASCII LF) or unescaped double quotes inside the JSON string values.
                                             """)
                                     .build(),
                             "message", Schema.builder()

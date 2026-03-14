@@ -292,6 +292,7 @@ public class ChatService {
                 if (chunk.web().isPresent()) {
                     var web = chunk.web().get();
                     String title = web.title().orElse("참고 링크");
+                    if (title.isBlank()) title = "참고 링크";
                     String uri = web.uri().orElse("");
                     if (!uri.isBlank()) {
                         tempSourceText.append("- [%s](<%s>)\n".formatted(title, uri));
