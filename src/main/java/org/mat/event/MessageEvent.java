@@ -6,7 +6,7 @@ import net.dv8tion.jda.api.entities.channel.concrete.ThreadChannel;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import org.mat.def.ImageType;
+import org.mat.def.FileType;
 import org.mat.tool.ChatService;
 import org.mat.tool.CommandManager;
 import org.mat.tool.Config;
@@ -52,8 +52,8 @@ public class MessageEvent extends ListenerAdapter {
         Message message = event.getMessage();
         String msg = message.getContentRaw();
 
-        boolean hasValidAtt = message.getAttachments().stream().anyMatch(Message.Attachment::isImage);
-        if (msg.isBlank() && !hasValidAtt) return;
+        List<Message.Attachment> attachments = message.getAttachments();
+        if (msg.isBlank() && !attachments.isEmpty()) return;
 
         long userId = user.getIdLong();
         long now = System.currentTimeMillis();
@@ -82,17 +82,21 @@ public class MessageEvent extends ListenerAdapter {
 
             db.addMessage(sessionId,message.getIdLong(), "user", message.getContentRaw(), "");
 
-            List<Message.Attachment> attachments = message.getAttachments();
-            List<CompletableFuture<Void>> imageFutures = new ArrayList<>();
+            List<CompletableFuture<Void>> fileFutures = new ArrayList<>();
             for (int i = 0; i < attachments.size(); i++) {
-                Message.Attachment img = attachments.get(i);
-                if (img.isImage()) {
+                Message.Attachment att = attachments.get(i);
+                String mimeType = att.getContentType();
+                if (mimeType == null) mimeType = "application/octet-stream"; // 모르면 기본값
+                if (mimeType.startsWith("image/") ||
+                        //mimeType.startsWith("video/") ||
+                        mimeType.startsWith("audio/") || mimeType.equals("application/pdf")) {
                     final int userOrder = i;
+                    final String finalMimeType = mimeType;
                     // 다운로드 -> 업로드 -> DB 저장
-                    CompletableFuture<Void> future = img.getProxy().download().thenCompose(inputStream -> {
+                    CompletableFuture<Void> future = att.getProxy().download().thenCompose(inputStream -> {
                         try (var is = inputStream) {
                             byte[] bytes = is.readAllBytes();
-                            return FileUtil.upload(event.getJDA(), bytes, img.getFileName(), sessionId);
+                            return FileUtil.upload(event.getJDA(), bytes, att.getFileName(), sessionId, finalMimeType);
                         } catch (Exception e) {
                             return CompletableFuture.failedFuture(e);
                         }
@@ -100,24 +104,25 @@ public class MessageEvent extends ListenerAdapter {
                         if (result != null) {
                             db.addAttachment(sessionId,
                                     message.getIdLong(),
-                                    ImageType.INPUT.name(),
+                                    FileType.INPUT.name(),
                                     result.url(),
                                     result.archiveMsgId(),
+                                    finalMimeType,
                                     userOrder);
                         }
                     });
-                    imageFutures.add(future);
+                    fileFutures.add(future);
                 }
             }
 
-            if (!imageFutures.isEmpty()) {
+            if (!fileFutures.isEmpty()) {
                 thread.sendTyping().queue();
 
                 // 모든 이미지 저장이 완료되면 채팅 처리
-                CompletableFuture.allOf(imageFutures.toArray(CompletableFuture[]::new))
+                CompletableFuture.allOf(fileFutures.toArray(CompletableFuture[]::new))
                         .thenRunAsync(() -> chat.processUserMessage(sessionId, message))
                         .exceptionally(e -> {
-                            logger.error("이미지 다중 처리 중 에러 발생", e);
+                            logger.error("파일 다중 처리 중 에러 발생", e);
                             return null;
                         });
             } else {

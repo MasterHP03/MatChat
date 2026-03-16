@@ -5,8 +5,8 @@ import com.google.genai.types.*;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.utils.FileUpload;
+import org.mat.def.FileType;
 import org.mat.def.GeminiModel;
-import org.mat.def.ImageType;
 import org.mat.def.Tools;
 import org.mat.exception.NoResponseException;
 import org.mat.util.FileUtil;
@@ -43,7 +43,7 @@ public class ChatService {
     public void processUserMessage(long sessionId, Message message) {
         List<Content> fullHistory = new ArrayList<>(db.getStructuredHistory(sessionId));
 
-        fullHistory = parseImage(message.getJDA(), fullHistory);
+        fullHistory = parseFiles(message.getJDA(), fullHistory);
         generateAndReply(sessionId, fullHistory, message);
     }
 
@@ -76,7 +76,7 @@ public class ChatService {
             return;
         }
 
-        fullHistory = parseImage(message.getJDA(), fullHistory);
+        fullHistory = parseFiles(message.getJDA(), fullHistory);
         generateAndReply(sessionId, fullHistory, message);
     }
 
@@ -376,6 +376,7 @@ public class ChatService {
                 (funcText.isBlank() || finalSourceText.isBlank() ? "" : "\n\n") + finalSourceText;
 
         final byte[] finalImageBytes = imageBytes;
+        final String mimeType = "image/png";
         FileUpload file = FileUpload.fromData(finalImageBytes, fileName);
         sendMessageInChunks(message, displayText, file, botMsg -> {
             db.addMessage(sessionId, botMsg.getIdLong(), "model", funcText, info.model(),
@@ -384,14 +385,15 @@ public class ChatService {
                     imageTokens[3], imageTokens[4], imageTokens[5],
                     finalSourceText);
 
-            FileUtil.upload(message.getJDA(), finalImageBytes, fileName, sessionId)
+            FileUtil.upload(message.getJDA(), finalImageBytes, fileName, sessionId, mimeType)
                     .thenAccept(result -> {
                         if (result != null) {
                             db.addAttachment(sessionId,
                                     botMsg.getIdLong(),
-                                    ImageType.GENERATED.name(),
+                                    FileType.GENERATED.name(),
                                     result.url(),
                                     result.archiveMsgId(),
+                                    mimeType,
                                     0);
                         }
                     });
@@ -416,7 +418,7 @@ public class ChatService {
         }
     }
 
-    private List<Content> parseImage(JDA jda, List<Content> toParse) {
+    private List<Content> parseFiles(JDA jda, List<Content> toParse) {
         List<Content> readyHistory = new ArrayList<>();
 
         for (Content c : toParse) {
@@ -425,23 +427,26 @@ public class ChatService {
             for (Part p : c.parts().orElse(new ArrayList<>())) {
                 String text = p.text().orElse(null);
 
-                if (text != null && text.startsWith("[IMG|")) {
+                if (text != null && text.startsWith("[FILE|")) {
                     try {
-                        // Getting rid of "[IMG|", "]", leaving "ID|URI|URL"
-                        String inner = text.substring(5, text.length() - 1);
+                        // [FILE|ID|URI|URL|MIME]
+                        String inner = text.substring(6, text.length() - 1);
+                        String[] tokens = inner.split("[|]", 4);
 
-                        String[] tokens = inner.split("[|]", 3);
                         long archiveId = Long.parseLong(tokens[0]);
                         String geminiUri = tokens[1].equals("null") ? null : tokens[1];
                         String url = tokens[2];
+                        String mimeType = tokens[3];
 
                         // ID Tag for Reference Image Call
-                        readyParts.add(Part.fromText(FileUtil.imageFormat.formatted(archiveId)));
+                        if (mimeType.startsWith("image/")) {
+                            readyParts.add(Part.fromText(FileUtil.imageFormat.formatted(archiveId)));
+                        }
 
-                        readyParts.add(toImagePart(jda, url, archiveId, geminiUri));
+                        readyParts.add(toFilePart(jda, url, archiveId, geminiUri, mimeType));
                     } catch (Exception e) {
-                        logger.error("이미지 태그 파싱 중 에러 발생: {}", text, e);
-                        readyParts.add(Part.fromText("[이미지 파싱 실패]"));
+                        logger.error("파일 태그 파싱 중 에러 발생: {}", text, e);
+                        readyParts.add(Part.fromText("[파일 파싱 실패]"));
                     }
                 } else {
                     // 일반 텍스트
@@ -458,34 +463,33 @@ public class ChatService {
         return readyHistory;
     }
 
-    private Part toImagePart(JDA jda, String oldUrl, long archiveMsgId, String geminiUri) {
+    private Part toFilePart(JDA jda, String oldUrl, long archiveMsgId, String geminiUri, String mimeType) {
         try {
-            String mimeType = oldUrl.contains(".png") ? "image/png" : "image/jpeg";
             if (geminiUri != null && !geminiUri.isBlank()) {
-                logger.info("이미지 캐시 적중, 다운로드 스킵 (ID: {})", archiveMsgId);
+                logger.info("파일 캐시 적중, 다운로드 스킵 (ID: {})", archiveMsgId);
                 return Part.fromUri(geminiUri, mimeType);
             }
 
-            logger.info("이미지 캐시 미스, 다운로드/구글 업로드 진행 (ID: {})", archiveMsgId);
-            FileUtil.ImageInfo image = FileUtil.getSafeImageBytes(jda, db, oldUrl, archiveMsgId);
-            if (image == null) throw new RuntimeException("가져온 이미지 데이터가 null입니다.");
+            logger.info("파일 캐시 미스, 다운로드/구글 업로드 진행 (ID: {})", archiveMsgId);
+            FileUtil.FileInfo file = FileUtil.getSafeFileBytes(jda, db, oldUrl, archiveMsgId);
+            if (file == null) throw new RuntimeException("가져온 파일 데이터가 null입니다.");
 
             String cleanUrl = oldUrl.split("\\?")[0];
             String fileName = cleanUrl.substring(cleanUrl.lastIndexOf("/") + 1);
             fileName = URLDecoder.decode(fileName, StandardCharsets.UTF_8);
 
-            String newUri = FileUtil.uploadToGemini(image.bytes(), image.mimeType(), fileName);
+            String newUri = FileUtil.uploadToGemini(file.bytes(), mimeType, fileName);
 
             if (newUri != null) {
                 db.updateGeminiUri(archiveMsgId, newUri);
                 return Part.fromUri(newUri, mimeType);
             } else {
                 logger.warn("구글 업로드 실패, 바이트 배열로 폴백 (ID: {})", archiveMsgId);
-                return Part.fromBytes(image.bytes(), image.mimeType());
+                return Part.fromBytes(file.bytes(), mimeType);
             }
         } catch (Exception e) {
-            logger.error("디스코드 이미지 다운로드 실패", e);
-            return Part.fromText("[이미지 로드 실패]");
+            logger.error("디스코드 파일 다운로드 실패", e);
+            return Part.fromText("[파일 로드 실패]");
         }
     }
 

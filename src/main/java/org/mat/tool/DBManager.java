@@ -74,6 +74,7 @@ public class DBManager {
                         session_id INTEGER NOT NULL,
                         msg_id INTEGER NOT NULL,
                         type TEXT NOT NULL,
+                        mime_type TEXT NOT NULL,
                         url TEXT NOT NULL,
                         gemini_uri TEXT,
                         archive_msg_id INTEGER NOT NULL,
@@ -165,8 +166,8 @@ public class DBManager {
                 // 이미지 추가
                 List<FileUtil.AttachmentInfo> attachments = getAttachments(sessionId, msgId);
                 for (FileUtil.AttachmentInfo att : attachments) {
-                    parts.add(Part.fromText(FileUtil.imageTagFormat.formatted(
-                            att.archiveMsgId(), att.geminiUri(), att.url())));
+                    parts.add(Part.fromText(FileUtil.fileTagFormat.formatted(
+                            att.archiveMsgId(), att.geminiUri(), att.url(), att.mimeType())));
                 }
 
                 Content content = Content.builder()
@@ -497,11 +498,12 @@ public class DBManager {
         return null; // 메시지 없음
     }
 
-    public boolean addAttachment(long sessionId, long msgId, String type, String url, long archiveMsgId, int userOrder) {
+    public boolean addAttachment(long sessionId, long msgId, String type, String url, long archiveMsgId,
+                                 String mimeType, int userOrder) {
         String sql = """
                 INSERT INTO attachments
-                (session_id, msg_id, type, url, archive_msg_id, user_order)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (session_id, msg_id, type, mime_type, url, archive_msg_id, ser_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = getConnection();
@@ -509,9 +511,10 @@ public class DBManager {
             pstmt.setLong(1, sessionId);
             pstmt.setLong(2, msgId);
             pstmt.setString(3, type);
-            pstmt.setString(4, url);
-            pstmt.setLong(5, archiveMsgId);
-            pstmt.setInt(6, userOrder);
+            pstmt.setString(4, mimeType);
+            pstmt.setString(5, url);
+            pstmt.setLong(6, archiveMsgId);
+            pstmt.setInt(7, userOrder);
             pstmt.executeUpdate();
 
             logger.info("첨부파일 링크 저장 완료 ({})", url);
@@ -525,7 +528,7 @@ public class DBManager {
     public List<FileUtil.AttachmentInfo> getAttachments(long sessionId, long msgId) {
         List<FileUtil.AttachmentInfo> atts = new ArrayList<>();
         String sql = """
-                SELECT url, archive_msg_id,
+                SELECT url, archive_msg_id, mime_type,
                     CASE
                         WHEN uri_created_at IS NOT NULL AND uri_created_at >= datetime('now', '-46 hours')
                         THEN gemini_uri
@@ -546,7 +549,8 @@ public class DBManager {
                 atts.add(new FileUtil.AttachmentInfo(
                         rs.getString("url"),
                         rs.getLong("archive_msg_id"),
-                        rs.getString("gemini_uri")));
+                        rs.getString("gemini_uri"),
+                        rs.getString("mime_type")));
             }
         } catch (SQLException e) {
             printStackTrace(e);
@@ -554,7 +558,7 @@ public class DBManager {
         return atts;
     }
 
-    public boolean updateImageUrl(long archiveMsgId, String url) {
+    public boolean updateFileUrl(long archiveMsgId, String url) {
         String sql = """
                 UPDATE attachments
                 SET url = ?

@@ -23,27 +23,30 @@ public class FileUtil {
     private static final Logger logger = LoggerFactory.getLogger(FileUtil.class);
     private static final HttpClient httpClient = HttpClient.newHttpClient();
 
-    public static final String imageTagFormat = "[IMG|%s|%s|%s]";
+    /**
+     * Format: [FILE|ID|URI|URL|MIME]
+     */
+    public static final String fileTagFormat = "[FILE|%s|%s|%s|%s]";
     public static final String imageFormat = "[Reference Id: %s]";
 
     /**
-     * Uploads uploaded or generated images to the archive channel.
+     * Uploads uploaded or generated files to the archive channel.
      * @param jda JDA instance.
-     * @param imageBytes Image to upload.
-     * @param fileName Filename of the image.
+     * @param fileBytes File to upload.
+     * @param fileName Filename of the file.
      * @param sessionId ID of the current session.
      */
-    public static CompletableFuture<AttachmentInfo> upload(JDA jda, byte[] imageBytes, String fileName, long sessionId) {
+    public static CompletableFuture<AttachmentInfo> upload(JDA jda, byte[] fileBytes, String fileName, long sessionId, String mimeType) {
         CompletableFuture<AttachmentInfo> future = new CompletableFuture<>();
         TextChannel archive = jda.getTextChannelById(Config.getArchive());
 
         if (archive != null) {
-            archive.sendFiles(FileUpload.fromData(imageBytes, fileName))
-                    .setContent("세션 " + sessionId + "의 이미지")
+            archive.sendFiles(FileUpload.fromData(fileBytes, fileName))
+                    .setContent("세션 " + sessionId + "의 파일")
                     .queue(message -> {
-                        String imageUrl = message.getAttachments().getFirst().getUrl();
+                        String fileUrl = message.getAttachments().getFirst().getUrl();
                         long archiveMsgId = message.getIdLong();
-                        future.complete(new AttachmentInfo(imageUrl, archiveMsgId, null));
+                        future.complete(new AttachmentInfo(fileUrl, archiveMsgId, null, mimeType));
                     }, future::completeExceptionally);
         } else {
             future.completeExceptionally(new RuntimeException("아카이브에 파일 업로드 중 에러 (아카이브 채널 ID 실수?)"));
@@ -54,21 +57,21 @@ public class FileUtil {
 
     /**
      * Gets data as byte array by HTTP request.
-     * @param imageUrl HTTP URL of data.
+     * @param fileUrl HTTP URL of data.
      * @return Data in byte array.
      */
-    private static HttpResponse<byte[]> download(String imageUrl) {
+    private static HttpResponse<byte[]> download(String fileUrl) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(imageUrl)).build();
+            HttpRequest request = HttpRequest.newBuilder(URI.create(fileUrl)).build();
 
             return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
         } catch (Exception e) {
-            logger.error("HTTP 이미지 다운로드 실패 ({})", imageUrl, e);
+            logger.error("HTTP 파일 다운로드 실패 ({})", fileUrl, e);
             return null;
         }
     }
 
-    public static ImageInfo getSafeImageBytes(JDA jda, DBManager db, String oldUrl, long archiveMsgId) {
+    public static FileInfo getSafeFileBytes(JDA jda, DBManager db, String oldUrl, long archiveMsgId) {
         HttpResponse<byte[]> response = download(oldUrl);
 
         try {
@@ -83,18 +86,18 @@ public class FileUtil {
                 Message msg = archive.retrieveMessageById(archiveMsgId).complete();
                 String freshUrl = msg.getAttachments().getFirst().getUrl();
 
-                db.updateImageUrl(archiveMsgId, freshUrl);
+                db.updateFileUrl(archiveMsgId, freshUrl);
 
                 response = download(freshUrl);
                 if (response == null || response.statusCode() != 200) {
                     throw new RuntimeException("새로 불러온 링크로도 다운로드 실패");
                 }
             }
-            byte[] imageBytes = response.body();
-            String mimeType = response.headers().firstValue("Content-Type").orElse("image/png");
-            return new ImageInfo(imageBytes, mimeType);
+            byte[] fileBytes = response.body();
+            String mimeType = response.headers().firstValue("Content-Type").orElse("application/octet-stream");
+            return new FileInfo(fileBytes, mimeType);
         } catch (Exception e) {
-            logger.error("디스코드 이미지 다운로드 실패", e);
+            logger.error("디스코드 파일 다운로드 실패", e);
             return null;
         }
     }
@@ -119,8 +122,8 @@ public class FileUtil {
         }
     }
 
-    public record AttachmentInfo(String url, long archiveMsgId, String geminiUri) {}
+    public record AttachmentInfo(String url, long archiveMsgId, String geminiUri, String mimeType) {}
 
-    public record ImageInfo(byte[] bytes, String mimeType) {}
+    public record FileInfo(byte[] bytes, String mimeType) {}
 
 }
