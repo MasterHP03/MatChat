@@ -502,7 +502,7 @@ public class DBManager {
                                  String mimeType, int userOrder) {
         String sql = """
                 INSERT INTO attachments
-                (session_id, msg_id, type, mime_type, url, archive_msg_id, ser_order)
+                (session_id, msg_id, type, mime_type, url, archive_msg_id, user_order)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """;
 
