@@ -195,7 +195,7 @@ public class ChatService {
 
                 StringBuilder combinedFormula = new StringBuilder("\\begin{aligned}\n");
                 for (int i = 0; i < formulas.size(); i++) {
-                    combinedFormula.append("&\\text{[수식 ").append(i + 1).append("]} \\quad {")
+                    combinedFormula.append("&\\text{[").append(i + 1).append("]} \\quad {")
                             .append(formulas.get(i)).append("}");
                     if (i < formulas.size() - 1) {
                         combinedFormula.append(" \\\\\n");
