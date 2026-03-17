@@ -17,7 +17,7 @@ public class LatexUtil {
 
     public static String renderToImageUrl(String formula) {
         try {
-            String preamble = "\\usepackage{amsmath}\\usepackage{amsfonts}\\usepackage{amssymb}";
+            String preamble = "\\usepackage{amsmath}\\usepackage{amsfonts}\\usepackage{amssymb}\\everymath{\\displaystyle}";
             String body = "formula=" + URLEncoder.encode(formula, StandardCharsets.UTF_8).replace("+", "%20") +
                     "&fsize=20" +
                     "&fcolor=ffffff" +
@@ -33,7 +33,7 @@ public class LatexUtil {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             String[] lines = response.body().split("\n");
 
-            // QuickLaTeX: 첫 줄 0이면 성공, 두 번째 줄에 이미지 URL
+            // QuickLaTeX: 첫 줄 0이면 성공, 두 번째 줄 첫 번째 arg에 이미지 URL
             if (lines.length > 1 && lines[0].trim().equals("0")) {
                 return lines[1].trim().split("\\s+")[0];
             } else {
