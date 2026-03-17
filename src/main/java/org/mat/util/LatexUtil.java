@@ -17,7 +17,9 @@ public class LatexUtil {
 
     public static String renderToImageUrl(String formula) {
         try {
-            String preamble = "\\usepackage{amsmath}\\usepackage{amsfonts}\\usepackage{amssymb}\\everymath{\\displaystyle}";
+            formula = formula.replace("\\frac", "\\dfrac");
+
+            String preamble = "\\usepackage{amsmath}\\usepackage{amsfonts}\\usepackage{amssymb}";
             String body = "formula=" + URLEncoder.encode(formula, StandardCharsets.UTF_8).replace("+", "%20") +
                     "&fsize=20" +
                     "&fcolor=ffffff" +
