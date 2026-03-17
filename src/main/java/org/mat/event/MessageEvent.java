@@ -53,7 +53,7 @@ public class MessageEvent extends ListenerAdapter {
         String msg = message.getContentRaw();
 
         List<Message.Attachment> attachments = message.getAttachments();
-        if (msg.isBlank() && !attachments.isEmpty()) return;
+        if (msg.isBlank() && attachments.isEmpty()) return;
 
         long userId = user.getIdLong();
         long now = System.currentTimeMillis();
