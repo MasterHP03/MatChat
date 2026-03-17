@@ -45,3 +45,4 @@ bin/
 .env
 test.db
 target/
+src/main/java/org/mat/test/

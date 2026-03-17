@@ -71,6 +71,14 @@ public class FileUtil {
         }
     }
 
+    public static byte[] downloadBytes(String fileUrl) {
+        HttpResponse<byte[]> response = download(fileUrl);
+        if (response != null && response.statusCode() == 200) {
+            return response.body();
+        }
+        return null;
+    }
+
     public static FileInfo getSafeFileBytes(JDA jda, DBManager db, String oldUrl, long archiveMsgId) {
         HttpResponse<byte[]> response = download(oldUrl);
 

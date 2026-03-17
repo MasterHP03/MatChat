@@ -10,6 +10,7 @@ import org.mat.def.GeminiModel;
 import org.mat.def.Tools;
 import org.mat.exception.NoResponseException;
 import org.mat.util.FileUtil;
+import org.mat.util.LatexUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,6 +23,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Interface between Discord and Gemini.
@@ -165,10 +168,63 @@ public class ChatService {
 
             // 텍스트면 출력 준비
             String responseText = response.text() == null ? "응답 없음" : response.text();
-            String displayResponseText = responseText + (sourceText.isBlank() ? "" : "\n\n" + sourceText);
+            String displayResponseText = responseText;
+
+            // 수식 번역 파트
+            Matcher matcher = Pattern.compile("\\$\\$(.*?)\\$\\$|\\\\\\((.*?)\\\\\\)", Pattern.DOTALL)
+                    .matcher(displayResponseText);
+
+            StringBuilder sb = new StringBuilder();
+            List<String> formulas = new ArrayList<>();
+            int mathCount = 1;
+
+            while (matcher.find()) {
+                String formula = matcher.group(1);
+                if (formula == null) formula = matcher.group(2);
+                formulas.add(formula.trim());
+                matcher.appendReplacement(sb, "[수식" + mathCount + "]");
+                mathCount++;
+            }
+            matcher.appendTail(sb);
+            displayResponseText = sb.toString();
+
+            FileUpload formulaFile = null;
+
+            if (!formulas.isEmpty()) {
+                logger.info("총 {}개의 수식 발견, 일괄 렌더링 시작", formulas.size());
+
+                StringBuilder combinedFormula = new StringBuilder("\\begin{aligned}\n");
+                for (int i = 0; i < formulas.size(); i++) {
+                    combinedFormula.append("&\\text{[수식 ").append(i + 1).append("]} \\quad {")
+                            .append(formulas.get(i)).append("}");
+                    if (i < formulas.size() - 1) {
+                        combinedFormula.append(" \\\\\n");
+                    } else {
+                        combinedFormula.append("\n");
+                    }
+                }
+                combinedFormula.append("\\end{aligned}");
+
+                String imageUrl = LatexUtil.renderToImageUrl(combinedFormula.toString());
+                if (imageUrl != null) {
+                    byte[] imageBytes = FileUtil.downloadBytes(imageUrl);
+                    if (imageBytes != null) {
+                        formulaFile = FileUpload.fromData(imageBytes, "formulas.png");
+                        logger.info("수식 모음 이미지 생성 완료");
+                    } else {
+                        logger.warn("수식 이미지 다운로드 실패");
+                        displayResponseText = responseText + "\n\n[수식 이미지 다운로드 실패]"; // 원본 텍스트라도 남아있게
+                    }
+                } else {
+                    logger.warn("QuickLaTeX API 렌더링 실패");
+                    displayResponseText = responseText + "\n\n[수식 이미지 서버 통신 실패]";
+                }
+            }
+
+            displayResponseText += (sourceText.isBlank() ? "" : "\n\n" + sourceText);
 
             // 메시지 분할 전송
-            sendMessageInChunks(message, displayResponseText, botMsg -> {
+            sendMessageInChunks(message, displayResponseText, formulaFile, botMsg -> {
                 // 메시지 전송 성공 시에만 DB에 현재 턴의 모든 내용 저장
                 // 유저 메시지는 MessageEvent에서 이미 저장함
                 // 청크 나눠보낼 때, 첫 청크를 보낼 때만 저장되도록
