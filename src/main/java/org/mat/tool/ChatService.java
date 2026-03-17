@@ -171,18 +171,21 @@ public class ChatService {
             String displayResponseText = responseText;
 
             // 수식 번역 파트
+            record FormulaInfo(String prefix, String formula) {};
+
             Matcher matcher = Pattern.compile("\\$\\$(.*?)\\$\\$|\\\\\\((.*?)\\\\\\)", Pattern.DOTALL)
                     .matcher(displayResponseText);
 
             StringBuilder sb = new StringBuilder();
-            List<String> formulas = new ArrayList<>();
+            List<FormulaInfo> formulas = new ArrayList<>();
             int mathCount = 1;
 
             while (matcher.find()) {
-                String formula = matcher.group(1);
-                if (formula == null) formula = matcher.group(2);
-                formulas.add(formula.trim());
-                matcher.appendReplacement(sb, "[수식" + mathCount + "]");
+                boolean isBlock = matcher.group(1) != null;
+                String rawFormula = isBlock ? matcher.group(1) : matcher.group(2);
+                String typePrefix = isBlock ? "B" : "I";
+                formulas.add(new FormulaInfo(typePrefix, rawFormula.trim()));
+                matcher.appendReplacement(sb, "[%s수식 %d]".formatted(typePrefix, mathCount));
                 mathCount++;
             }
             matcher.appendTail(sb);
@@ -195,8 +198,9 @@ public class ChatService {
 
                 StringBuilder combinedFormula = new StringBuilder("\\begin{aligned}\n");
                 for (int i = 0; i < formulas.size(); i++) {
-                    combinedFormula.append("&\\text{[").append(i + 1).append("]} \\quad {")
-                            .append(formulas.get(i)).append("}");
+                    FormulaInfo fmlInfo = formulas.get(i);
+                    combinedFormula.append("&\\text{[").append(fmlInfo.prefix()).append(i + 1).append("]} \\quad {")
+                            .append(fmlInfo.formula()).append("}");
                     if (i < formulas.size() - 1) {
                         combinedFormula.append(" \\\\\n");
                     } else {
