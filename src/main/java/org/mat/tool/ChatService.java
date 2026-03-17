@@ -199,7 +199,7 @@ public class ChatService {
                 StringBuilder combinedFormula = new StringBuilder("\\begin{aligned}\n");
                 for (int i = 0; i < formulas.size(); i++) {
                     FormulaInfo fmlInfo = formulas.get(i);
-                    combinedFormula.append("&\\text{[").append(fmlInfo.prefix()).append(i + 1).append("]} \\quad {")
+                    combinedFormula.append("\\text{[").append(fmlInfo.prefix()).append(i + 1).append("]}& \\quad {")
                             .append(fmlInfo.formula()).append("}");
                     if (i < formulas.size() - 1) {
                         combinedFormula.append(" \\\\\n");

@@ -19,7 +19,7 @@ public class LatexUtil {
         try {
             formula = formula.replace("\\frac", "\\dfrac");
 
-            String preamble = "\\usepackage{amsmath}\\usepackage{amsfonts}\\usepackage{amssymb}";
+            String preamble = "\\usepackage{amsmath}\\usepackage{amsfonts}\\usepackage{amssymb}\\everymath{\\displaystyle}";
             String body = "formula=" + URLEncoder.encode(formula, StandardCharsets.UTF_8).replace("+", "%20") +
                     "&fsize=20" +
                     "&fcolor=ffffff" +
