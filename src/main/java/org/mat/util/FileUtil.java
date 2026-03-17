@@ -23,6 +23,8 @@ public class FileUtil {
     private static final Logger logger = LoggerFactory.getLogger(FileUtil.class);
     private static final HttpClient httpClient = HttpClient.newHttpClient();
 
+    private static final Client geminiClient = Client.builder().apiKey(Config.getGeminiKey()).build();
+
     /**
      * Format: [FILE|ID|URI|URL|MIME]
      */
@@ -111,10 +113,8 @@ public class FileUtil {
     }
 
     public static String uploadToGemini(byte[] bytes, String mimeType, String displayName) {
-        try (Client client = Client.builder()
-                .apiKey(Config.getGeminiKey()).
-                build()) {
-            File uploadedFile = client.files.upload(
+        try {
+            File uploadedFile = geminiClient.files.upload(
                     bytes,
                     UploadFileConfig.builder()
                             .mimeType(mimeType)
