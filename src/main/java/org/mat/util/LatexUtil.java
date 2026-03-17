@@ -18,12 +18,12 @@ public class LatexUtil {
     public static String renderToImageUrl(String formula) {
         try {
             String preamble = "\\usepackage{amsmath}\\usepackage{amsfonts}\\usepackage{amssymb}";
-            String body = "formula=" + URLEncoder.encode(formula, StandardCharsets.UTF_8) +
+            String body = "formula=" + URLEncoder.encode(formula, StandardCharsets.UTF_8).replace("+", "%20") +
                     "&fsize=20" +
                     "&fcolor=ffffff" +
                     "&mode=0" +
                     "&out=1" +
-                    "&preamble=" + URLEncoder.encode(preamble, StandardCharsets.UTF_8);
+                    "&preamble=" + URLEncoder.encode(preamble, StandardCharsets.UTF_8).replace("+", "%20");
 
             HttpRequest request = HttpRequest.newBuilder(URI.create("https://quicklatex.com/latex3.f"))
                     .header("Content-Type", "application/x-www-form-urlencoded")
