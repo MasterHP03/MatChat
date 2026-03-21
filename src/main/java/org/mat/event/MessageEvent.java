@@ -85,8 +85,10 @@ public class MessageEvent extends ListenerAdapter {
             List<CompletableFuture<Void>> fileFutures = new ArrayList<>();
             for (int i = 0; i < attachments.size(); i++) {
                 Message.Attachment att = attachments.get(i);
-                String mimeType = att.getContentType();
-                if (mimeType == null) mimeType = "application/octet-stream"; // 모르면 기본값
+                String rawMimeType = att.getContentType();
+                if (rawMimeType == null) rawMimeType = "application/octet-stream"; // 모르면 기본값
+                String mimeType = rawMimeType.split(";")[0].trim();
+
                 boolean isMediaOrPdf = mimeType.startsWith("image/") || mimeType.startsWith("audio/") || mimeType.equals("application/pdf");
                 boolean isText = mimeType.startsWith("text/");
                 boolean isMsOffice = mimeType.contains("openxmlformats-officedocument");
