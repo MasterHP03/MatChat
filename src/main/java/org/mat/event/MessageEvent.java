@@ -87,9 +87,11 @@ public class MessageEvent extends ListenerAdapter {
                 Message.Attachment att = attachments.get(i);
                 String mimeType = att.getContentType();
                 if (mimeType == null) mimeType = "application/octet-stream"; // 모르면 기본값
-                if (mimeType.startsWith("image/") ||
-                        //mimeType.startsWith("video/") ||
-                        mimeType.startsWith("audio/") || mimeType.equals("application/pdf")) {
+                boolean isMediaOrPdf = mimeType.startsWith("image/") || mimeType.startsWith("audio/") || mimeType.equals("application/pdf");
+                boolean isText = mimeType.startsWith("text/");
+                boolean isMsOffice = mimeType.contains("openxmlformats-officedocument");
+                boolean isValidAtt = isMediaOrPdf || isText || isMsOffice;
+                if (isValidAtt) {
                     final int userOrder = i;
                     final String finalMimeType = mimeType;
                     // 다운로드 -> 업로드 -> DB 저장
