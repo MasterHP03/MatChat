@@ -16,14 +16,17 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 public class FileUtil {
 
     private static final Logger logger = LoggerFactory.getLogger(FileUtil.class);
-    private static final HttpClient httpClient = HttpClient.newHttpClient();
+    private static final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .build();
 
-    private static final Client geminiClient = Client.builder().apiKey(Config.getGeminiKey()).build();
+    private static final Client geminiClient = GeminiClientManager.getClient();
 
     /**
      * Format: [FILE|ID|URI|URL|MIME]
@@ -64,7 +67,9 @@ public class FileUtil {
      */
     private static HttpResponse<byte[]> download(String fileUrl) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(fileUrl)).build();
+            HttpRequest request = HttpRequest.newBuilder(URI.create(fileUrl))
+                    .timeout(Duration.ofSeconds(60))
+                    .build();
 
             return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
         } catch (Exception e) {

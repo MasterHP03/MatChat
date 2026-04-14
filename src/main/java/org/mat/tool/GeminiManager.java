@@ -4,6 +4,7 @@ import com.google.genai.Client;
 import com.google.genai.types.*;
 import org.mat.def.Tools;
 import org.mat.exception.NoResponseException;
+import org.mat.util.GeminiClientManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +20,8 @@ public class GeminiManager {
                     .build())
             .build();
 
+    private static final Client geminiClient = GeminiClientManager.getClient();
+
     /**
      * Sends a requests to Gemini API and gets a response.
      * @param systemPrompt Bot's persona.
@@ -32,60 +35,44 @@ public class GeminiManager {
     public static GenerateContentResponse generate(String systemPrompt, List<Content> history,
                                                    String model, String userNote,
                                                    boolean enableImageTool, boolean enableSearchTool) throws RuntimeException {
-        try (Client client = Client.builder()
-                .apiKey(Config.getGeminiKey())
-                .httpOptions(HttpOptions.builder()
-                        .retryOptions(HttpRetryOptions.builder()
-                                .attempts(Config.getMaxRetry())
-                                .build())
-                        .build())
-                .build()) {
-            // 시스템 프롬프트와 유저 노트 병합
-            String finalPrompt = systemPrompt;
-            if (!userNote.isBlank()) finalPrompt += "\n\n[User-defined Instruction]\n" + userNote;
+        // 시스템 프롬프트와 유저 노트 병합
+        String finalPrompt = systemPrompt;
+        if (!userNote.isBlank()) finalPrompt += "\n\n[User-defined Instruction]\n" + userNote;
 
-            GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
-                    .systemInstruction(Content.fromParts(
-                            Part.fromText(finalPrompt)))
-                    .maxOutputTokens(Config.getMaxOutputToken());
-            List<Tool> tools = new ArrayList<>();
-            if (enableImageTool) tools.add(imageTool);
-            if (enableSearchTool) tools.add(searchTool);
-            if (!tools.isEmpty()) configBuilder.tools(tools);
+        GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
+                .systemInstruction(Content.fromParts(
+                        Part.fromText(finalPrompt)))
+                .maxOutputTokens(Config.getMaxOutputToken());
+        List<Tool> tools = new ArrayList<>();
+        if (enableImageTool) tools.add(imageTool);
+        if (enableSearchTool) tools.add(searchTool);
+        if (!tools.isEmpty()) configBuilder.tools(tools);
 
-            GenerateContentConfig config = configBuilder.build();
+        GenerateContentConfig config = configBuilder.build();
 
-            // Gemini 호출
-            GenerateContentResponse response = client.models.generateContent(
-                    model, history, config
-            );
+        // Gemini 호출
+        GenerateContentResponse response = geminiClient.models.generateContent(
+                model, history, config
+        );
 
-            // 응답이 없을 경우, 필터 때문인지 검사
-            if (response.candidates().isEmpty()) {
-                String reason = "응답 없음";
-                if (response.promptFeedback().isPresent()) {
-                    GenerateContentResponsePromptFeedback feedback = response.promptFeedback().get();
-                    reason = String.join(" | ",
-                            feedback.blockReason().toString(),
-                            feedback.blockReasonMessage().toString(),
-                            feedback.safetyRatings().toString());
-                }
-                throw new NoResponseException(reason);
+        // 응답이 없을 경우, 필터 때문인지 검사
+        if (response.candidates().isEmpty()) {
+            String reason = "응답 없음";
+            if (response.promptFeedback().isPresent()) {
+                GenerateContentResponsePromptFeedback feedback = response.promptFeedback().get();
+                reason = String.join(" | ",
+                        feedback.blockReason().toString(),
+                        feedback.blockReasonMessage().toString(),
+                        feedback.safetyRatings().toString());
             }
-
-            return response;
+            throw new NoResponseException(reason);
         }
+
+        return response;
     }
 
     public static GenerateContentResponse generateImage(String prompt, List<Part> referenceImages, boolean enableSearchTool) {
-        try (Client client = Client.builder()
-                .apiKey(Config.getGeminiKey())
-                .httpOptions(HttpOptions.builder()
-                        .retryOptions(HttpRetryOptions.builder()
-                                .attempts(Config.getMaxRetry())
-                                .build())
-                        .build())
-                .build()) {
+        try {
             List<Part> inputParts = new ArrayList<>();
             if (referenceImages != null && !referenceImages.isEmpty()) {
                 inputParts.addAll(referenceImages);
@@ -101,7 +88,7 @@ public class GeminiManager {
             if (!tools.isEmpty()) configBuilder.tools(tools);
             GenerateContentConfig config = configBuilder.build();
 
-            GenerateContentResponse response = client.models.generateContent(
+            GenerateContentResponse response = geminiClient.models.generateContent(
                     "gemini-3.1-flash-image-preview", inputContent, config
             );
 
