@@ -23,8 +23,14 @@ public class Config {
         return dotenv.get("DISCORD_TOKEN");
     }
 
+    // compatibility in case
     public static String getGeminiKey() {
-        return dotenv.get("GEMINI_API_KEY");
+        return dotenv.get("GEMINI_API_KEY", "").split(",")[0];
+    }
+
+    public static String[] getGeminiKeys() {
+        String str_keys = dotenv.get("GEMINI_API_KEY", "");
+        return str_keys.split(",");
     }
 
     public static String getDbUrl() {

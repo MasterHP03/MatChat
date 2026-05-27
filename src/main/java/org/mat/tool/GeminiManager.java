@@ -1,10 +1,14 @@
 package org.mat.tool;
 
 import com.google.genai.Client;
+import com.google.genai.errors.ApiException;
 import com.google.genai.types.*;
 import org.mat.def.Tools;
+import org.mat.event.MessageEvent;
 import org.mat.exception.NoResponseException;
 import org.mat.util.GeminiClientManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +24,7 @@ public class GeminiManager {
                     .build())
             .build();
 
-    private static final Client geminiClient = GeminiClientManager.getClient();
+    private static final Logger logger = LoggerFactory.getLogger(GeminiManager.class);
 
     /**
      * Sends a requests to Gemini API and gets a response.
@@ -39,7 +43,7 @@ public class GeminiManager {
         String finalPrompt = systemPrompt;
         if (!userNote.isBlank()) finalPrompt += "\n\n[User-defined Instruction]\n" + userNote;
 
-        GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
+        var configBuilder = GenerateContentConfig.builder()
                 .systemInstruction(Content.fromParts(
                         Part.fromText(finalPrompt)))
                 .maxOutputTokens(Config.getMaxOutputToken());
@@ -48,27 +52,45 @@ public class GeminiManager {
         if (enableSearchTool) tools.add(searchTool);
         if (!tools.isEmpty()) configBuilder.tools(tools);
 
-        GenerateContentConfig config = configBuilder.build();
+        var config = configBuilder.build();
 
         // Gemini 호출
-        GenerateContentResponse response = geminiClient.models.generateContent(
-                model, history, config
-        );
+        int attemptCount = 0;
+        int totalClients = GeminiClientManager.getClientCount();
 
-        // 응답이 없을 경우, 필터 때문인지 검사
-        if (response.candidates().isEmpty()) {
-            String reason = "응답 없음";
-            if (response.promptFeedback().isPresent()) {
-                GenerateContentResponsePromptFeedback feedback = response.promptFeedback().get();
-                reason = String.join(" | ",
-                        feedback.blockReason().toString(),
-                        feedback.blockReasonMessage().toString(),
-                        feedback.safetyRatings().toString());
+        while (attemptCount < totalClients) {
+            try {
+                Client client = GeminiClientManager.getClient();
+
+                var response = client.models.generateContent(
+                        model, history, config
+                );
+
+                // 응답이 없을 경우, 필터 때문인지 검사
+                if (response.candidates().isEmpty()) {
+                    String reason = "응답 없음";
+                    if (response.promptFeedback().isPresent()) {
+                        var feedback = response.promptFeedback().get();
+                        reason = String.join(" | ",
+                                feedback.blockReason().toString(),
+                                feedback.blockReasonMessage().toString(),
+                                feedback.safetyRatings().toString());
+                    }
+                    throw new NoResponseException(reason);
+                }
+                return response;
+            } catch (ApiException e) {
+                if (e.code() == 429) {
+                    logger.info("현재 키 만료, 다음 키로 로테이션");
+                    GeminiClientManager.rotateClient(); // 인덱스 + 1
+                    attemptCount++;
+                    if (attemptCount >= totalClients) {
+                        throw e;
+                    }
+                } else throw e;
             }
-            throw new NoResponseException(reason);
         }
-
-        return response;
+        return null;
     }
 
     public static GenerateContentResponse generateImage(String prompt, List<Part> referenceImages, boolean enableSearchTool) {
@@ -81,34 +103,54 @@ public class GeminiManager {
 
             Content inputContent = Content.builder().parts(inputParts).build();
 
-            GenerateContentConfig.Builder configBuilder = GenerateContentConfig.builder()
+            var configBuilder = GenerateContentConfig.builder()
                     .responseModalities("TEXT", "IMAGE");
             List<Tool> tools = new ArrayList<>();
             if (enableSearchTool) tools.add(searchTool);
             if (!tools.isEmpty()) configBuilder.tools(tools);
-            GenerateContentConfig config = configBuilder.build();
+            var config = configBuilder.build();
 
-            GenerateContentResponse response = geminiClient.models.generateContent(
-                    "gemini-3.1-flash-image-preview", inputContent, config
-            );
+            // 호출
+            int attemptCount = 0;
+            int totalClients = GeminiClientManager.getClientCount();
 
-            // 응답이 없을 경우, 필터 때문인지 검사
-            if (response.candidates().isEmpty()) {
-                String reason = "응답 없음";
-                if (response.promptFeedback().isPresent()) {
-                    GenerateContentResponsePromptFeedback feedback = response.promptFeedback().get();
-                    reason = String.join(" | ",
-                            feedback.blockReason().toString(),
-                            feedback.blockReasonMessage().toString(),
-                            feedback.safetyRatings().toString());
+            while (attemptCount < totalClients) {
+                try {
+                    Client client = GeminiClientManager.getClient();
+
+                    var response = client.models.generateContent(
+                            "gemini-3.1-flash-image-preview", inputContent, config
+                    );
+
+                    // 응답이 없을 경우, 필터 때문인지 검사
+                    if (response.candidates().isEmpty()) {
+                        String reason = "응답 없음";
+                        if (response.promptFeedback().isPresent()) {
+                            var feedback = response.promptFeedback().get();
+                            reason = String.join(" | ",
+                                    feedback.blockReason().toString(),
+                                    feedback.blockReasonMessage().toString(),
+                                    feedback.safetyRatings().toString());
+                        }
+                        throw new NoResponseException(reason);
+                    }
+                    return response;
+                } catch (ApiException e) {
+                    if (e.code() == 429) {
+                        logger.info("이미지 요청에서 현재 키 만료, 다음 키로 로테이션");
+                        GeminiClientManager.rotateClient(); // 인덱스 + 1
+                        attemptCount++;
+                        if (attemptCount >= totalClients) {
+                            throw e;
+                        }
+                    } else throw e;
                 }
-                throw new NoResponseException(reason);
             }
-
-            return response;
         } catch (Exception e) {
             throw new RuntimeException("이미지 생성 실패: " + e.getMessage(), e);
         }
+
+        return null;
     }
 
     private static Tool getTool(Tools tool) {
