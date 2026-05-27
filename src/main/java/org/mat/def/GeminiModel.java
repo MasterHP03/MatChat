@@ -3,8 +3,9 @@ package org.mat.def;
 public enum GeminiModel {
     PRO31("gemini-3.1-pro-preview"),
     // PRO3("gemini-3-pro-preview"),
+    FLASH35("gemini-3.5-flash"),
     FLASH3("gemini-3-flash-preview"),
-    FLASHLITE31("gemini-3.1-flash-lite-preview"),
+    FLASHLITE31("gemini-3.1-flash-lite"),
     PRO25("gemini-2.5-pro"),
     FLASH25("gemini-2.5-flash"),
     FLASH20("gemini-2.0-flash");
