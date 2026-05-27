@@ -55,42 +55,26 @@ public class GeminiManager {
         var config = configBuilder.build();
 
         // Gemini 호출
-        int attemptCount = 0;
-        int totalClients = GeminiClientManager.getClientCount();
+        Client client = GeminiClientManager.getClient();
 
-        while (attemptCount < totalClients) {
-            try {
-                Client client = GeminiClientManager.getClient();
+        var response = client.models.generateContent(
+                model, history, config
+        );
 
-                var response = client.models.generateContent(
-                        model, history, config
-                );
-
-                // 응답이 없을 경우, 필터 때문인지 검사
-                if (response.candidates().isEmpty()) {
-                    String reason = "응답 없음";
-                    if (response.promptFeedback().isPresent()) {
-                        var feedback = response.promptFeedback().get();
-                        reason = String.join(" | ",
-                                feedback.blockReason().toString(),
-                                feedback.blockReasonMessage().toString(),
-                                feedback.safetyRatings().toString());
-                    }
-                    throw new NoResponseException(reason);
-                }
-                return response;
-            } catch (ApiException e) {
-                if (e.code() == 429) {
-                    logger.info("현재 키 만료, 다음 키로 로테이션");
-                    GeminiClientManager.rotateClient(); // 인덱스 + 1
-                    attemptCount++;
-                    if (attemptCount >= totalClients) {
-                        throw e;
-                    }
-                } else throw e;
+        // 응답이 없을 경우, 필터 때문인지 검사
+        if (response.candidates().isEmpty()) {
+            String reason = "응답 없음";
+            if (response.promptFeedback().isPresent()) {
+                var feedback = response.promptFeedback().get();
+                reason = String.join(" | ",
+                        feedback.blockReason().toString(),
+                        feedback.blockReasonMessage().toString(),
+                        feedback.safetyRatings().toString());
             }
+            throw new NoResponseException(reason);
         }
-        return null;
+
+        return response;
     }
 
     public static GenerateContentResponse generateImage(String prompt, List<Part> referenceImages, boolean enableSearchTool) {
@@ -111,48 +95,30 @@ public class GeminiManager {
             var config = configBuilder.build();
 
             // 호출
-            int attemptCount = 0;
-            int totalClients = GeminiClientManager.getClientCount();
+            Client client = GeminiClientManager.getClient();
 
-            while (attemptCount < totalClients) {
-                try {
-                    Client client = GeminiClientManager.getClient();
+            var response = client.models.generateContent(
+                    "gemini-3.1-flash-image-preview", inputContent, config
+            );
 
-                    var response = client.models.generateContent(
-                            "gemini-3.1-flash-image-preview", inputContent, config
-                    );
-
-                    // 응답이 없을 경우, 필터 때문인지 검사
-                    if (response.candidates().isEmpty()) {
-                        String reason = "응답 없음";
-                        if (response.promptFeedback().isPresent()) {
-                            var feedback = response.promptFeedback().get();
-                            reason = String.join(" | ",
-                                    feedback.blockReason().toString(),
-                                    feedback.blockReasonMessage().toString(),
-                                    feedback.safetyRatings().toString());
-                        }
-                        throw new NoResponseException("이미지 생성 실패: " + reason);
-                    }
-                    return response;
-                } catch (ApiException e) {
-                    if (e.code() == 429) {
-                        logger.info("이미지 요청에서 현재 키 만료, 다음 키로 로테이션");
-                        GeminiClientManager.rotateClient(); // 인덱스 + 1
-                        attemptCount++;
-                        if (attemptCount >= totalClients) {
-                            throw e;
-                        }
-                    } else throw e;
+            // 응답이 없을 경우, 필터 때문인지 검사
+            if (response.candidates().isEmpty()) {
+                String reason = "응답 없음";
+                if (response.promptFeedback().isPresent()) {
+                    var feedback = response.promptFeedback().get();
+                    reason = String.join(" | ",
+                            feedback.blockReason().toString(),
+                            feedback.blockReasonMessage().toString(),
+                            feedback.safetyRatings().toString());
                 }
+                throw new NoResponseException("이미지 생성 실패: " + reason);
             }
+            return response;
         } catch (ApiException | NoResponseException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("이미지 생성 실패: " + e.getMessage(), e);
         }
-
-        return null;
     }
 
     private static Tool getTool(Tools tool) {

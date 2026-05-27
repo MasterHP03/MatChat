@@ -5,6 +5,7 @@ import com.google.genai.types.*;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.utils.FileUpload;
+import org.jetbrains.annotations.NotNull;
 import org.mat.def.FileType;
 import org.mat.def.GeminiModel;
 import org.mat.def.Tools;
@@ -48,11 +49,7 @@ public class ChatService {
      * @param message Message sent by user this turn.
      */
     public void processUserMessage(long sessionId, Message message) {
-        String hashedKey = GeminiClientManager.getHashedKey();
-        List<Content> fullHistory = new ArrayList<>(db.getStructuredHistory(sessionId, hashedKey));
-
-        fullHistory = parseFiles(message.getJDA(), fullHistory);
-        generateAndReply(sessionId, fullHistory, message);
+        generateAndReply(sessionId, message);
     }
 
     /**
@@ -77,26 +74,22 @@ public class ChatService {
             db.deleteMessage(sessionId, lastMsgId);
         }
 
-        // 마지막 메시지가 유저이므로, 추가 작업 없이 그대로 로드
-        String hashedKey = GeminiClientManager.getHashedKey();
-        List<Content> fullHistory = db.getStructuredHistory(sessionId, hashedKey);
-        if (fullHistory.isEmpty()) {
-            message.reply("재생성할 대화 내역이 없습니다.").queue();
-            return;
-        }
-
-        fullHistory = parseFiles(message.getJDA(), fullHistory);
-        generateAndReply(sessionId, fullHistory, message);
+        generateAndReply(sessionId, message);
     }
 
     /**
      * Receives a response from Gemini and sends it to Discord.
      * If the response is too long, it slices it before sending.
      * @param sessionId ID of chat session.
-     * @param fullHistory Full context of the session.
      * @param message User's current message (for reply).
      */
-    public void generateAndReply(long sessionId, List<Content> fullHistory, Message message) {
+    public void generateAndReply(long sessionId, Message message) {
+        List<Content> fullHistory = db.getStructuredHistory(sessionId);
+        if (fullHistory.isEmpty()) {
+            message.reply("재생성할 대화 내역이 없습니다.").queue();
+            return;
+        }
+
         DBManager.SessionInfo info = db.getSessionInfo(sessionId);
         String systemPrompt = Config.getSystemInstruction(info.persona());
 
@@ -143,10 +136,34 @@ public class ChatService {
                 }
             }
 
-            // Gemini 호출
-            GenerateContentResponse response = GeminiManager.generate(systemPrompt, fullHistory,
-                    info.model(), info.userNote(),
-                    mainImage, mainSearch);
+            // Gemini 호출 (요청 반복)
+            int attemptCount = 0;
+            int totalClients = GeminiClientManager.getClientCount();
+
+            GenerateContentResponse response = null;
+            while (attemptCount < totalClients) {
+                try {
+                    // Files API를 이용한 이미지 Part를 위해 매번 파싱
+                    List<Content> fullHistoryParsed = parseFiles(message.getJDA(), fullHistory);
+
+                    response = GeminiManager.generate(systemPrompt, fullHistoryParsed,
+                            info.model(), info.userNote(),
+                            mainImage, mainSearch);
+                    break;
+                } catch (ApiException e) {
+                    if (e.code() == 429) {
+                        logger.info("현재 키 만료, 다음 키로 로테이션");
+                        GeminiClientManager.rotateClient(); // 인덱스 + 1
+                        attemptCount++;
+                        if (attemptCount >= totalClients) {
+                            throw e;
+                        }
+                    } else throw e;
+                }
+            }
+            if (response == null) {
+                throw new RuntimeException("응답이 null입니다.");
+            }
 
             List<Candidate> candidates = response.candidates().orElse(new ArrayList<>());
             Content responseContent = candidates.getFirst().content().orElseThrow(() ->
@@ -386,30 +403,55 @@ public class ChatService {
 
         @SuppressWarnings("unchecked")
         List<String> refIds = (List<String>) args.getOrDefault("reference_ids", new ArrayList<>());
-        List<Part> referenceParts = new ArrayList<>();
 
-        for (String idStr : refIds) {
-            boolean found = false;
-            for (Content content : fullHistory) {
-                List<Part> parts = content.parts().orElse(new ArrayList<>());
-                for (int i = 0; i < parts.size(); i++) {
-                    String text = parts.get(i).text().orElse("");
-                    if (text.contains(FileUtil.imageFormat.formatted(idStr))) {
-                        if (i + 1 < parts.size()) {
-                            referenceParts.add(parts.get(i + 1));
-                            logger.info("이미지 ID: {} 참조", idStr);
-                            found = true;
-                            break;
+        // 요청 반복
+        int attemptCount = 0;
+        int totalClients = GeminiClientManager.getClientCount();
+
+        GenerateContentResponse funcResponse = null;
+        while (attemptCount < totalClients) {
+            try {
+                // 매번 파싱해주고 새로 이미지 Parts 픽업
+                List<Content> fullHistoryParsed = parseFiles(message.getJDA(), fullHistory);
+
+                List<Part> referenceParts = new ArrayList<>();
+                for (String idStr : refIds) {
+                    boolean found = false;
+                    for (Content content : fullHistoryParsed) {
+                        List<Part> parts = content.parts().orElse(new ArrayList<>());
+                        for (int i = 0; i < parts.size(); i++) {
+                            String text = parts.get(i).text().orElse("");
+                            if (text.contains(FileUtil.imageFormat.formatted(idStr))) {
+                                if (i + 1 < parts.size()) {
+                                    referenceParts.add(parts.get(i + 1));
+                                    logger.info("현재 키 기준 이미지 ID: {} 참조", idStr);
+                                    found = true;
+                                    break;
+                                }
+                            }
                         }
+                        if (found) break;
                     }
+                    if (!found) logger.warn("대화 내역에서 레퍼런스 이미지를 찾을 수 없음 (ID: {})", idStr);
                 }
-                if (found) break;
-            }
-            if (!found) logger.warn("대화 내역에서 레퍼런스 이미지를 찾을 수 없음 (ID: {})", idStr);
-        }
 
-        GenerateContentResponse funcResponse = GeminiManager.generateImage(imagePrompt,
-                referenceParts, allowGoogleSearch);
+                funcResponse = GeminiManager.generateImage(imagePrompt,
+                        referenceParts, allowGoogleSearch);
+                break;
+            } catch (ApiException e) {
+                if (e.code() == 429) {
+                    logger.info("이미지 생성 중 현재 키 만료, 다음 키로 로테이션");
+                    GeminiClientManager.rotateClient(); // 인덱스 + 1
+                    attemptCount++;
+                    if (attemptCount >= totalClients) {
+                        throw e;
+                    }
+                } else throw e;
+            }
+        }
+        if (funcResponse == null) {
+            throw new RuntimeException("응답이 null입니다.");
+        }
 
         List<Candidate> funcCandidates = funcResponse.candidates().orElse(new ArrayList<>());
         // 출처 리스트 추출
@@ -495,21 +537,20 @@ public class ChatService {
 
                 if (text != null && text.startsWith("[FILE|")) {
                     try {
-                        // [FILE|ID|URI|URL|MIME]
+                        // [FILE|ID|URL|MIME]
                         String inner = text.substring(6, text.length() - 1);
-                        String[] tokens = inner.split("[|]", 4);
+                        String[] tokens = inner.split("[|]", 3);
 
                         long archiveId = Long.parseLong(tokens[0]);
-                        String geminiUri = tokens[1].equals("null") ? null : tokens[1];
-                        String url = tokens[2];
-                        String mimeType = tokens[3];
+                        String url = tokens[1];
+                        String mimeType = tokens[2];
 
                         // ID Tag for Reference Image Call
                         if (mimeType.startsWith("image/")) {
                             readyParts.add(Part.fromText(FileUtil.imageFormat.formatted(archiveId)));
                         }
 
-                        readyParts.add(toFilePart(jda, url, archiveId, geminiUri, mimeType));
+                        readyParts.add(toFilePart(jda, url, archiveId, mimeType));
                     } catch (Exception e) {
                         logger.error("파일 태그 파싱 중 에러 발생: {}", text, e);
                         readyParts.add(Part.fromText("[파일 파싱 실패]"));
@@ -529,10 +570,13 @@ public class ChatService {
         return readyHistory;
     }
 
-    private Part toFilePart(JDA jda, String oldUrl, long archiveMsgId, String geminiUri, String mimeType) {
+    private Part toFilePart(JDA jda, String oldUrl, long archiveMsgId, String mimeType) {
         try {
+            String currentHash = GeminiClientManager.getHashedKey();
+            String geminiUri = db.getValidCachedUri(archiveMsgId, currentHash);
+
             if (geminiUri != null && !geminiUri.isBlank()) {
-                logger.info("파일 캐시 적중, 다운로드 스킵 (ID: {})", archiveMsgId);
+                logger.info("현재 키 (Hash {}) 파일 캐시 적중, 다운로드 스킵 (ID: {})", currentHash, archiveMsgId);
                 return Part.fromUri(geminiUri, mimeType);
             }
 
@@ -547,8 +591,7 @@ public class ChatService {
             String newUri = FileUtil.uploadToGemini(file.bytes(), mimeType, fileName);
 
             if (newUri != null) {
-                String hashedKey = GeminiClientManager.getHashedKey();
-                db.updateGeminiUri(archiveMsgId, hashedKey, newUri);
+                db.updateGeminiUri(archiveMsgId, currentHash, newUri);
                 return Part.fromUri(newUri, mimeType);
             } else {
                 logger.warn("구글 업로드 실패, 바이트 배열로 폴백 (ID: {})", archiveMsgId);

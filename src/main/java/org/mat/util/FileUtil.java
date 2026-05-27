@@ -26,12 +26,10 @@ public class FileUtil {
             .connectTimeout(Duration.ofSeconds(30))
             .build();
 
-    private static final Client geminiClient = GeminiClientManager.getClient();
-
     /**
-     * Format: [FILE|ID|URI|URL|MIME]
+     * Format: [FILE|ID|URL|MIME]
      */
-    public static final String fileTagFormat = "[FILE|%s|%s|%s|%s]";
+    public static final String fileTagFormat = "[FILE|%s|%s|%s]";
     public static final String imageFormat = "[Reference Id: %s]";
 
     /**
@@ -51,7 +49,7 @@ public class FileUtil {
                     .queue(message -> {
                         String fileUrl = message.getAttachments().getFirst().getUrl();
                         long archiveMsgId = message.getIdLong();
-                        future.complete(new AttachmentInfo(fileUrl, archiveMsgId, null, mimeType));
+                        future.complete(new AttachmentInfo(fileUrl, archiveMsgId, mimeType));
                     }, future::completeExceptionally);
         } else {
             future.completeExceptionally(new RuntimeException("아카이브에 파일 업로드 중 에러 (아카이브 채널 ID 실수?)"));
@@ -119,7 +117,9 @@ public class FileUtil {
 
     public static String uploadToGemini(byte[] bytes, String mimeType, String displayName) {
         try {
-            File uploadedFile = geminiClient.files.upload(
+            Client currentClient = GeminiClientManager.getClient();
+
+            File uploadedFile = currentClient.files.upload(
                     bytes,
                     UploadFileConfig.builder()
                             .mimeType(mimeType)
@@ -135,7 +135,7 @@ public class FileUtil {
         }
     }
 
-    public record AttachmentInfo(String url, long archiveMsgId, String geminiUri, String mimeType) {}
+    public record AttachmentInfo(String url, long archiveMsgId, String mimeType) {}
 
     public record FileInfo(byte[] bytes, String mimeType) {}
 
