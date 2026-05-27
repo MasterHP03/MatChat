@@ -132,7 +132,7 @@ public class GeminiManager {
                                     feedback.blockReasonMessage().toString(),
                                     feedback.safetyRatings().toString());
                         }
-                        throw new NoResponseException(reason);
+                        throw new NoResponseException("이미지 생성 실패: " + reason);
                     }
                     return response;
                 } catch (ApiException e) {
@@ -146,6 +146,8 @@ public class GeminiManager {
                     } else throw e;
                 }
             }
+        } catch (ApiException | NoResponseException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("이미지 생성 실패: " + e.getMessage(), e);
         }
