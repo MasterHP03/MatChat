@@ -77,10 +77,8 @@ public class DBManager {
                         type TEXT NOT NULL,
                         mime_type TEXT NOT NULL,
                         url TEXT NOT NULL,
-                        gemini_uri TEXT,
                         archive_msg_id INTEGER NOT NULL,
                         user_order INTEGER DEFAULT 0,
-                        uri_created_at DATETIME,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (session_id, msg_id)
                         REFERENCES messages(session_id, msg_id) ON DELETE CASCADE
