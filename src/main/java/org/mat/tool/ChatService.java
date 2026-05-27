@@ -17,6 +17,8 @@ import org.slf4j.LoggerFactory;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -94,12 +96,12 @@ public class ChatService {
         DBManager.SessionInfo info = db.getSessionInfo(sessionId);
         String systemPrompt = Config.getSystemInstruction(info.persona());
 
-        String currentTime = LocalDateTime.now()
+        String currentTime = ZonedDateTime.now(ZoneId.of("Asia/Seoul"))
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         String timeContext = """
                 \n
                 [System Note (Do not consider this as user input)]
-                Current Time (GMT): %s
+                Current Time (KST): %s
                 """.formatted(currentTime);
 
         Content lastContent = fullHistory.getLast();
