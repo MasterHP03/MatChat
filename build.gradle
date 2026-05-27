@@ -23,7 +23,7 @@ dependencies {
     implementation("com.google.protobuf:protobuf-java:3.25.5")
     implementation("commons-codec:commons-codec:1.13")
     implementation("com.fasterxml.jackson.core:jackson-core:2.21.2")
-    implementation("com.google.genai:google-genai:1.37.0")
+    implementation("com.google.genai:google-genai:1.55.0")
     implementation("org.xerial:sqlite-jdbc:3.51.1.0")
     implementation("org.slf4j:slf4j-simple:2.0.17")
     implementation("io.github.cdimascio:java-dotenv:5.2.2")
