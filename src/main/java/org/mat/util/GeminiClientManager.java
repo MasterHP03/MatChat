@@ -10,7 +10,8 @@ import java.util.List;
 
 public class GeminiClientManager {
     private static final List<Client> INSTANCES = new ArrayList<>();
-    private static int currentIndex = 0;
+    private static volatile int currentIndex = 0;
+    private static volatile String hashedKey;
 
     static {
         String[] keys = Config.getGeminiKeys();
@@ -26,20 +27,26 @@ public class GeminiClientManager {
                     .build();
             INSTANCES.add(client);
         }
+        hashedKey = MatHash.hashApiKey(keys[0].trim());
     }
 
-    public static Client getClient() {
+    public static synchronized Client getClient() {
         if (INSTANCES.isEmpty()) {
             throw new IllegalStateException("No API Key registered");
         }
         return INSTANCES.get(currentIndex);
     }
 
-    public static void rotateClient() {
+    public static synchronized void rotateClient() {
         currentIndex = (currentIndex + 1) % INSTANCES.size();
+        hashedKey = MatHash.hashApiKey(INSTANCES.get(currentIndex).apiKey()).trim();
     }
 
     public static int getClientCount() {
         return INSTANCES.size();
+    }
+
+    public static synchronized String getHashedKey() {
+        return hashedKey;
     }
 }

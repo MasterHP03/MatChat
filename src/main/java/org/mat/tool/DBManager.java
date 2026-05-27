@@ -5,6 +5,7 @@ import com.google.genai.types.Part;
 import org.mat.def.SessionSetting;
 import org.mat.def.Tools;
 import org.mat.util.FileUtil;
+import org.mat.util.MatHash;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,6 +95,15 @@ public class DBManager {
                         PRIMARY KEY (record_date, model_id)
                     );
                     """);
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS gemini_file_caches (
+                        archive_msg_id INTEGER,
+                        api_key_hash TEXT,
+                        gemini_uri TEXT,
+                        uri_created_at DATETIME,
+                        PRIMARY KEY (archive_msg_id, api_key_hash)
+                    );
+                    """);
 
             logger.info("DB 생성됨");
         } catch (SQLException e) {
@@ -137,7 +147,7 @@ public class DBManager {
      * @param sessionId Chat session to get full history.
      * @return List of the contents.
      */
-    public List<Content> getStructuredHistory(long sessionId) {
+    public List<Content> getStructuredHistory(long sessionId, String apiKey) {
         List<Content> history = new ArrayList<>();
         String sql = """
                 SELECT msg_id, role, content
@@ -164,7 +174,7 @@ public class DBManager {
                 }
 
                 // 이미지 추가
-                List<FileUtil.AttachmentInfo> attachments = getAttachments(sessionId, msgId);
+                List<FileUtil.AttachmentInfo> attachments = getAttachments(sessionId, msgId, apiKey);
                 for (FileUtil.AttachmentInfo att : attachments) {
                     parts.add(Part.fromText(FileUtil.fileTagFormat.formatted(
                             att.archiveMsgId(), att.geminiUri(), att.url(), att.mimeType())));
@@ -525,24 +535,28 @@ public class DBManager {
         return false;
     }
 
-    public List<FileUtil.AttachmentInfo> getAttachments(long sessionId, long msgId) {
+    public List<FileUtil.AttachmentInfo> getAttachments(long sessionId, long msgId, String apiKey) {
         List<FileUtil.AttachmentInfo> atts = new ArrayList<>();
         String sql = """
-                SELECT url, archive_msg_id, mime_type,
+                SELECT a.url, a.archive_msg_id, a.mime_type,
                     CASE
-                        WHEN uri_created_at IS NOT NULL AND uri_created_at >= datetime('now', '-46 hours')
-                        THEN gemini_uri
+                        WHEN c.uri_created_at IS NOT NULL AND c.uri_created_at >= datetime('now', '-46 hours')
+                        THEN c.gemini_uri
                         ELSE NULL
                     END AS gemini_uri
-                FROM attachments
-                WHERE session_id = ? AND msg_id = ?
-                ORDER BY user_order ASC, id ASC
+                FROM attachments a
+                LEFT JOIN gemini_file_caches c
+                    ON a.archive_msg_id = c.archive_msg_id
+                    AND c.api_key_hash = ?
+                WHERE a.session_id = ? AND a.msg_id = ?
+                ORDER BY a.user_order ASC, a.id ASC
                 """;
 
         try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setLong(1, sessionId);
-            pstmt.setLong(2, msgId);
+            pstmt.setString(1,  apiKey);
+            pstmt.setLong(2, sessionId);
+            pstmt.setLong(3, msgId);
             ResultSet rs = pstmt.executeQuery();
 
             while (rs.next()) {
@@ -579,20 +593,22 @@ public class DBManager {
         return false;
     }
 
-    public boolean updateGeminiUri(long archiveMsgId, String geminiUri) {
+    public boolean updateGeminiUri(long archiveMsgId, String apiKey, String geminiUri) {
         String sql = """
-                UPDATE attachments
-                SET gemini_uri = ?, uri_created_at = CURRENT_TIMESTAMP
-                WHERE archive_msg_id = ?
+                INSERT INTO gemini_file_caches (archive_msg_id, api_key_hash, gemini_uri, uri_created_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(archive_msg_id, api_key_hash)
+                DO UPDATE SET gemini_uri = excluded.gemini_uri, uri_created_at = CURRENT_TIMESTAMP
                 """;
 
         try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, geminiUri);
-            pstmt.setLong(2, archiveMsgId);
+            pstmt.setLong(1, archiveMsgId);
+            pstmt.setString(2, apiKey);
+            pstmt.setString(3, geminiUri);
             pstmt.executeUpdate();
 
-            logger.info("Files API 캐시 업데이트됨 ({})", geminiUri);
+            logger.info("Key (Index {})에 대한 Files API 캐시 업데이트됨 ({})", apiKey, geminiUri);
             return true;
         } catch (SQLException e) {
             printStackTrace(e);

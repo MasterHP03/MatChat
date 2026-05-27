@@ -10,7 +10,9 @@ import org.mat.def.GeminiModel;
 import org.mat.def.Tools;
 import org.mat.exception.NoResponseException;
 import org.mat.util.FileUtil;
+import org.mat.util.GeminiClientManager;
 import org.mat.util.LatexUtil;
+import org.mat.util.MatHash;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +48,8 @@ public class ChatService {
      * @param message Message sent by user this turn.
      */
     public void processUserMessage(long sessionId, Message message) {
-        List<Content> fullHistory = new ArrayList<>(db.getStructuredHistory(sessionId));
+        String hashedKey = GeminiClientManager.getHashedKey();
+        List<Content> fullHistory = new ArrayList<>(db.getStructuredHistory(sessionId, hashedKey));
 
         fullHistory = parseFiles(message.getJDA(), fullHistory);
         generateAndReply(sessionId, fullHistory, message);
@@ -75,7 +78,8 @@ public class ChatService {
         }
 
         // 마지막 메시지가 유저이므로, 추가 작업 없이 그대로 로드
-        List<Content> fullHistory = db.getStructuredHistory(sessionId);
+        String hashedKey = GeminiClientManager.getHashedKey();
+        List<Content> fullHistory = db.getStructuredHistory(sessionId, hashedKey);
         if (fullHistory.isEmpty()) {
             message.reply("재생성할 대화 내역이 없습니다.").queue();
             return;
@@ -543,7 +547,8 @@ public class ChatService {
             String newUri = FileUtil.uploadToGemini(file.bytes(), mimeType, fileName);
 
             if (newUri != null) {
-                db.updateGeminiUri(archiveMsgId, newUri);
+                String hashedKey = GeminiClientManager.getHashedKey();
+                db.updateGeminiUri(archiveMsgId, hashedKey, newUri);
                 return Part.fromUri(newUri, mimeType);
             } else {
                 logger.warn("구글 업로드 실패, 바이트 배열로 폴백 (ID: {})", archiveMsgId);
