@@ -596,7 +596,7 @@ public class DBManager {
             pstmt.setString(3, geminiUri);
             pstmt.executeUpdate();
 
-            logger.info("Key (Index {})에 대한 Files API 캐시 업데이트됨 ({})", apiKey, geminiUri);
+            logger.info("Key (Hash {})에 대한 Files API 캐시 업데이트됨 ({})", apiKey, geminiUri);
             return true;
         } catch (SQLException e) {
             printStackTrace(e);
