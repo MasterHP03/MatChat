@@ -536,7 +536,7 @@ public class DBManager {
     public List<FileUtil.AttachmentInfo> getAttachments(long sessionId, long msgId) {
         List<FileUtil.AttachmentInfo> atts = new ArrayList<>();
         String sql = """
-                SELECT url, archive_msg_id, mime_type,
+                SELECT url, archive_msg_id, mime_type
                 FROM attachments
                 WHERE session_id = ? AND msg_id = ?
                 ORDER BY user_order ASC, id ASC
