@@ -51,7 +51,8 @@ public class GeminiManager {
         if (enableImageTool) tools.add(imageTool);
         if (enableSearchTool) tools.add(searchTool);
         if (!tools.isEmpty()) configBuilder.tools(tools);
-
+        configBuilder.thinkingConfig(ThinkingConfig.builder()
+                .thinkingLevel(ThinkingLevel.Known.HIGH).build());
         var config = configBuilder.build();
 
         // Gemini 호출
