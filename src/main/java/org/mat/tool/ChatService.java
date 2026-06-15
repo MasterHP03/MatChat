@@ -1,6 +1,7 @@
 package org.mat.tool;
 
 import com.google.genai.errors.ApiException;
+import com.google.genai.errors.GenAiIOException;
 import com.google.genai.types.*;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Message;
@@ -520,6 +521,8 @@ public class ChatService {
             ).queue();
         } else if (e instanceof NoResponseException) {
             message.reply(e.getMessage()).queue();
+        } else if (e instanceof GenAiIOException) {
+            message.reply("API I/O 오류: " + e.getMessage()).queue();
         } else {
             logger.error("응답 중 알 수 없는 오류: ", e);
             message.reply("알 수 없는 오류: " + e.getMessage()).queue();
